@@ -1,232 +1,247 @@
-// OctoWS2811 - Independent effects per output (5 curtains)
-// Change: LEDS_PER_STRIP, NUM_STRIPS_USED, and stripConfig[] to fit your setup.
-// If using Teensy 4.x with custom pins, enable USE_PINLIST and fill pinList[].
+// OctoWS2811 - Horizontal star transfer with trail across 5 curtains (20x26 each)
+// Assumes: 5 curtains side-by-side => total width = 5 * 20 = 100 columns
+// Orange star(s) moving left->right on same row, with fade trail.
+// Tweak the top configuration block for star count, speed, fade, mapping, row selection.
 
 #include <OctoWS2811.h>
+#include <Arduino.h>
 
-// ---------------- USER CONFIG ----------------
-const int NUM_STRIPS_USED = 5;     // you said 5 curtains
-const int LEDS_PER_STRIP   = 520;  // <-- change to your curtain height
+// ---------------- USER CONFIG - EDIT THESE ----------------
+const int CURTAINS = 5;             // number of data pins / curtains
+const int CURTAIN_WIDTH = 20;       // columns per curtain
+const int CURTAIN_HEIGHT = 26;      // rows per curtain
+// Combined
+const int TOTAL_WIDTH = CURTAINS * CURTAIN_WIDTH;
+const int TOTAL_HEIGHT = CURTAIN_HEIGHT;
+const int LEDS_PER_CURTAIN = CURTAIN_WIDTH * CURTAIN_HEIGHT;
 
-// If you use Teensy 4.x and want a custom pin mapping, set to true and edit pinList.
-// If false, the library uses default Octo pins (good with PJRC Octo adapter and Teensy 3.x).
+// Octo pins: set USE_PINLIST true if you want custom pins (Teensy 4.x). Example defaults below for 5 pins.
 const bool USE_PINLIST = false;
-const byte pinListExample[NUM_STRIPS_USED] = { 2, 14, 7, 8, 6 }; // example pin mapping (change if needed)
-// ------------------------------------------------
+const byte pinList[CURTAINS] = { 2, 14, 7, 8, 6 }; // change if using custom wiring / Teensy4
+// Mapping flags - set to match how the curtain is wired internally:
+// LAYOUT_ROWS = true -> index advances by columns across a ROW then next row (row-major).
+// If false -> column-major (advance down column then next column).
+const bool SERPENTINE = false;       // common curtain wiring is serpentine (every other row reversed)
 
-// --- OctoWS memory (do NOT change unless you know what you're doing) ---
-DMAMEM int displayMemory[LEDS_PER_STRIP * 6];
-int drawingMemory[LEDS_PER_STRIP * 6];
+// If a curtain is wired upside-down, set invertCurtain[i] = true for that curtain.
+bool invertCurtain[CURTAINS] = { false, false, false, false, false };
+
+// Star effect tuning:
+const int STAR_COUNT = 45;          // simultaneous stars
+const float MIN_SPEED_COLS_PER_SEC = 10; // columns per second (global columns)
+const float MAX_SPEED_COLS_PER_SEC = 50;
+const float FADE_FACTOR = 0.86f;    // 0..1 per-frame fade (closer to 1 = longer trails)
+const unsigned long FRAME_TARGET_MS = 20; // target frame time (ms) - ~50 FPS
+const bool RANDOM_ROWS = true;     // false => use ROW_TO_USE; true => pick random rows for each star
+const bool WRAP_STARS = false;      // when a star reaches right edge: wrap or respawn on left
+
+// Orange color for stars
+const uint8_t STAR_R = 255;
+const uint8_t STAR_G = 191;
+const uint8_t STAR_B = 0;
+// ------------------------------------------------------------
+
+// OctoWS memory (must be sized to LEDs per curtain)
+DMAMEM int displayMemory[LEDS_PER_CURTAIN * 6];
+int drawingMemory[LEDS_PER_CURTAIN * 6];
 const int config = WS2811_GRB | WS2811_800kHz;
 
 #if USE_PINLIST
-OctoWS2811 leds(LEDS_PER_STRIP, displayMemory, drawingMemory, config, NUM_STRIPS_USED, (byte*)pinListExample);
+OctoWS2811 leds(LEDS_PER_CURTAIN, displayMemory, drawingMemory, config, CURTAINS, (byte*)pinList);
 #else
-OctoWS2811 leds(LEDS_PER_STRIP, displayMemory, drawingMemory, config);
+OctoWS2811 leds(LEDS_PER_CURTAIN, displayMemory, drawingMemory, config);
 #endif
 
-// ---------------- Effect system ----------------
-enum Effect {
-  EF_OFF = 0,
-  EF_SOLID,
-  EF_MOVING_DOT,
-  EF_RAINBOW,
-  EF_THEATER_CHASE,
-  EF_SPARKLE,
-  EF_GRADIENT_WIPE,
-  EF_COUNT
+// Software RGB buffer for smooth trails
+const int NUM_PIXELS = CURTAINS * LEDS_PER_CURTAIN;
+uint8_t *pixBuf = nullptr; // NUM_PIXELS * 3 bytes
+
+struct Star {
+  float x;       // global continuous column position (0 .. TOTAL_WIDTH)
+  int row;       // row (0 .. TOTAL_HEIGHT-1)
+  float vx;      // columns per second (speed)
+  float bright;  // 0..1 multiplier
 };
+Star *stars = nullptr;
 
-struct StripConfig {
-  Effect effect;
-  uint8_t r1, g1, b1; // primary color
-  uint8_t r2, g2, b2; // secondary color / accent
-  uint16_t speed;     // lower = faster (ms per step)
-};
+unsigned long lastMicros = 0;
 
-// per-strip configuration: set desired effect and colors here
-StripConfig stripConfig[NUM_STRIPS_USED] = {
-  { EF_RAINBOW,       255,0,0,   0,0,0,   20 },  // strip 0
-  { EF_MOVING_DOT,    0,255,0,   0,0,0,   10 },  // strip 1
-  { EF_THEATER_CHASE, 0,0,255,   60,60,60, 60 },  // strip 2
-  { EF_SPARKLE,       255,200,0, 0,0,0,   30 },  // strip 3
-  { EF_GRADIENT_WIPE, 255,0,255, 0,0,0,   25 }   // strip 4
-};
-
-// per-strip runtime state
-struct StripState {
-  uint32_t lastUpdateMs;
-  uint16_t pos;       // generic position counter
-  uint8_t  seed;      // for sparkle randomness
-} states[NUM_STRIPS_USED];
-
-// utility: color wheel (0..255) -> 24-bit RGB
-uint32_t colorWheel(uint8_t pos) {
-  pos = 255 - pos;
-  if (pos < 85) return ((255 - pos * 3) << 16) | (0 << 8) | (pos * 3);
-  if (pos < 170) { pos -= 85; return ((0) << 16) | ((pos*3) << 8) | (255 - pos*3); }
-  pos -= 170; return ((pos*3) << 16) | ((255 - pos*3) << 8) | 0;
-}
-
-inline void setStripPixelColor(int stripIndex, int pixelIndex, uint8_t r, uint8_t g, uint8_t b) {
-  if (stripIndex < 0 || stripIndex >= NUM_STRIPS_USED || pixelIndex < 0 || pixelIndex >= LEDS_PER_STRIP) return;
-  int globalIndex = stripIndex * LEDS_PER_STRIP + pixelIndex;
-  leds.setPixel(globalIndex, r, g, b);
-}
-
-inline void clearStrip(int s) {
-  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i,0,0,0);
-}
-
-// EFFECT IMPLEMENTATIONS:
-// Each function fills only pixels for strip `s`. Use stripConfig[s] for parameters and states[s] for runtime.
-
-void effect_off(int s) {
-  clearStrip(s);
-}
-
-void effect_solid(int s) {
-  auto &cfg = stripConfig[s];
-  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i,cfg.r1,cfg.g1,cfg.b1);
-}
-
-void effect_moving_dot(int s) {
-  auto &cfg = stripConfig[s];
-  StripState &st = states[s];
-  // move 1 pixel down the curtain
-  int pos = st.pos % LEDS_PER_STRIP;
-  clearStrip(s);
-  // tail pixels for nicer look
-  int tail = 4;
-  for (int i=0;i<tail;i++) {
-    int p = pos - i;
-    if (p < 0) p += LEDS_PER_STRIP; // wrap
-    uint8_t scale = 255 - (i * (255 / (tail+1)));
-    setStripPixelColor(s, p, (cfg.r1 * scale) >> 8, (cfg.g1 * scale) >> 8, (cfg.b1 * scale) >> 8);
-  }
-  // advance position handled by caller timing
-}
-
-void effect_rainbow(int s) {
-  // scrolling rainbow down the curtain
-  StripState &st = states[s];
-  for (int i=0;i<LEDS_PER_STRIP;i++) {
-    uint8_t wheelPos = (uint8_t)((i + st.pos) & 255);
-    uint32_t col = colorWheel(wheelPos);
-    setStripPixelColor(s, i, (col>>16)&0xFF, (col>>8)&0xFF, col&0xFF);
-  }
-}
-
-void effect_theater_chase(int s) {
-  auto &cfg = stripConfig[s];
-  StripState &st = states[s];
-  // simple theater chase: on/off pattern moving down
-  int q = st.pos % 3;
-  for (int i=0;i<LEDS_PER_STRIP;i++) {
-    if ((i + q) % 3 == 0) setStripPixelColor(s,i,cfg.r1,cfg.g1,cfg.b1);
-    else setStripPixelColor(s,i,0,0,0);
-  }
-}
-
-void effect_sparkle(int s) {
-  auto &cfg = stripConfig[s];
-  StripState &st = states[s];
-  // mostly background color dim, with random sparkles
-  uint8_t bgdim = 20;
-  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i, (cfg.r1*bgdim)>>8, (cfg.g1*bgdim)>>8, (cfg.b1*bgdim)>>8 );
-  // create a few sparkles based on seed
-  uint8_t sparks = 3;
-  uint16_t seed = (st.seed << 8) | (st.pos & 0xFF);
-  for (int k=0;k<sparks;k++) {
-    // simple LCG
-    seed = (uint16_t)(seed * 109 + 89);
-    int p = seed % LEDS_PER_STRIP;
-    // brighter pixel
-    setStripPixelColor(s, p, cfg.r1, cfg.g1, cfg.b1);
-  }
-}
-
-void effect_gradient_wipe(int s) {
-  auto &cfg = stripConfig[s];
-  StripState &st = states[s];
-  int limit = st.pos % (LEDS_PER_STRIP + 1);
-  for (int i=0;i<LEDS_PER_STRIP;i++) {
-    if (i < limit) {
-      // blend r1..r2 across filled region
-      float t = (limit <= 1) ? 0.0f : float(i) / float(max(1, limit-1));
-      uint8_t r = uint8_t((1.0f - t) * cfg.r2 + t * cfg.r1);
-      uint8_t g = uint8_t((1.0f - t) * cfg.g2 + t * cfg.g1);
-      uint8_t b = uint8_t((1.0f - t) * cfg.b2 + t * cfg.b1);
-      setStripPixelColor(s, i, r,g,b);
+// Utility: return linear pixel index inside a curtain given local (col,row)
+// according to LAYOUT_ROWS and SERPENTINE settings.
+int localIndexInCurtain(int col, int row) {
+    if (SERPENTINE && (col % 2 == 1)) {
+      return col * CURTAIN_HEIGHT + (CURTAIN_HEIGHT - 1 - row);
     } else {
-      setStripPixelColor(s, i, 0,0,0);
+      return col * CURTAIN_HEIGHT + row;
+    }
+}
+
+// Convert global (curtainIndex, localIndex) to Octo global index:
+int globalOctoIndex(int curtainIdx, int localIndex) {
+  // global index used by OctoWS: curtainIdx * LEDS_PER_CURTAIN + localIndex
+  return curtainIdx * LEDS_PER_CURTAIN + localIndex;
+}
+
+// Add RGB to soft buffer (with clipping)
+inline void addPixelRGB_soft(int globalPixelIdx, float r, float g, float b) {
+  if (globalPixelIdx < 0 || globalPixelIdx >= NUM_PIXELS) return;
+  int base = globalPixelIdx * 3;
+  int v;
+  v = (int)pixBuf[base + 0] + (int)r; if (v > 255) v = 255; pixBuf[base + 0] = (uint8_t)v;
+  v = (int)pixBuf[base + 1] + (int)g; if (v > 255) v = 255; pixBuf[base + 1] = (uint8_t)v;
+  v = (int)pixBuf[base + 2] + (int)b; if (v > 255) v = 255; pixBuf[base + 2] = (uint8_t)v;
+}
+
+// Render a star at continuous global x position onto the soft buffer on integer row `row`
+// with horizontal blending between columns for smooth motion.
+void renderStarToBuffer(const Star &s) {
+  float fx = s.x;
+  int leftCol = (int)floorf(fx);
+  float frac = fx - leftCol;
+  float wl = 1.0f - frac;
+  float wr = frac;
+
+  // color scaled by brightness (0..1). Convert to 0..255 space then multiply weights.
+  float br = s.bright;
+  float rL = STAR_R * br * wl;
+  float gL = STAR_G * br * wl;
+  float bL = STAR_B * br * wl;
+  float rR = STAR_R * br * wr;
+  float gR = STAR_G * br * wr;
+  float bR = STAR_B * br * wr;
+
+  // left column
+  if (leftCol >= 0 && leftCol < TOTAL_WIDTH) {
+    int curtainL = leftCol / CURTAIN_WIDTH;
+    int localColL = leftCol % CURTAIN_WIDTH;
+    int row = s.row;
+    // handle per-curtain inversion of rows
+    if (curtainL >= 0 && curtainL < CURTAINS) {
+      int rowOut = invertCurtain[curtainL] ? (CURTAIN_HEIGHT - 1 - row) : row;
+      int localIndex = localIndexInCurtain(localColL, rowOut);
+      int globalIdx = globalOctoIndex(curtainL, localIndex);
+      addPixelRGB_soft(globalIdx, rL, gL, bL);
+    }
+  }
+
+  // right column (leftCol+1)
+  int rightCol = leftCol + 1;
+  if (rightCol >= 0 && rightCol < TOTAL_WIDTH) {
+    int curtainR = rightCol / CURTAIN_WIDTH;
+    int localColR = rightCol % CURTAIN_WIDTH;
+    int row = s.row;
+    if (curtainR >= 0 && curtainR < CURTAINS) {
+      int rowOut = invertCurtain[curtainR] ? (CURTAIN_HEIGHT - 1 - row) : row;
+      int localIndex = localIndexInCurtain(localColR, rowOut);
+      int globalIdx = globalOctoIndex(curtainR, localIndex);
+      addPixelRGB_soft(globalIdx, rR, gR, bR);
     }
   }
 }
 
-// update dispatch
-void updateStripFrame(int s) {
-  switch (stripConfig[s].effect) {
-    case EF_OFF: effect_off(s); break;
-    case EF_SOLID: effect_solid(s); break;
-    case EF_MOVING_DOT: effect_moving_dot(s); break;
-    case EF_RAINBOW: effect_rainbow(s); break;
-    case EF_THEATER_CHASE: effect_theater_chase(s); break;
-    case EF_SPARKLE: effect_sparkle(s); break;
-    case EF_GRADIENT_WIPE: effect_gradient_wipe(s); break;
-    default: effect_off(s); break;
+void fadeBuffer() {
+  int total = NUM_PIXELS * 3;
+  for (int i = 0; i < total; i++) {
+    float v = (float)pixBuf[i] * FADE_FACTOR;
+    if (v < 0.5f) v = 0.0f;
+    pixBuf[i] = (uint8_t)min(255.0f, v);
   }
 }
 
-// ---------------- setup / loop ----------------
+// Copy the soft buffer into Octo drawing buffer (leds.setPixel)
+void copyBufferToOcto() {
+  for (int curtain = 0; curtain < CURTAINS; curtain++) {
+    for (int localIndex = 0; localIndex < LEDS_PER_CURTAIN; localIndex++) {
+      int globalIdx = curtain * LEDS_PER_CURTAIN + localIndex;
+      int base = globalIdx * 3;
+      uint8_t r = pixBuf[base + 0];
+      uint8_t g = pixBuf[base + 1];
+      uint8_t b = pixBuf[base + 2];
+      leds.setPixel(globalIdx, r, g, b);
+    }
+  }
+}
+
+void resetStar(Star &s, bool randomRowAllowed=true) {
+  // spawn slightly left of 0 so it slides in smoothly
+  s.x = - (random(0, 50) / 25.0f); // -0 .. -2
+  if (RANDOM_ROWS && randomRowAllowed)
+    s.row = random(0, CURTAIN_HEIGHT);
+
+  s.vx = random((int)(MIN_SPEED_COLS_PER_SEC * 100.0f), (int)(MAX_SPEED_COLS_PER_SEC * 100.0f)) / 100.0f;
+  s.bright = random(1, 101) / 100.0f; // 0.7 .. 1.0
+}
+
 void setup() {
   Serial.begin(115200);
-  while (!Serial) { } // wait for serial (Teensy)
-  Serial.println("OctoWS2811 - per-strip effects example (5 curtains)");
-  #if USE_PINLIST
-    Serial.println("Using custom pinList");
-  #else
-    Serial.println("Using default Octo pins (PJRC Octo adapter or Teensy default mapping)");
-  #endif
+  while (!Serial) { } // wait for USB serial
+  Serial.println("OctoWS - horizontal orange-star transfer across curtains");
+  Serial.print("Display: "); Serial.print(TOTAL_WIDTH); Serial.print("x"); Serial.println(TOTAL_HEIGHT);
+
+  // allocate buffers
+  pixBuf = (uint8_t*) malloc((size_t)NUM_PIXELS * 3);
+  if (!pixBuf) {
+    Serial.println("ERROR: not enough RAM for pixBuf");
+    while (1) delay(1000);
+  }
+  memset(pixBuf, 0, (size_t)NUM_PIXELS * 3);
+
+  stars = (Star*) malloc(sizeof(Star) * STAR_COUNT);
+  if (!stars) {
+    Serial.println("ERROR: not enough RAM for stars array");
+    while (1) delay(1000);
+  }
+
+  randomSeed(analogRead(A0) ^ micros());
+  for (int i = 0; i < STAR_COUNT; i++) {
+    resetStar(stars[i], true);
+    // spread initial x so they don't all appear at once
+    stars[i].x = random(0, TOTAL_WIDTH * 100) / 100.0f;
+  }
 
   leds.begin();
-  leds.show(); // blank initially
+  leds.show(); // clear
   delay(50);
-
-  // init states
-  for (int s=0;s<NUM_STRIPS_USED;s++) {
-    states[s].lastUpdateMs = millis();
-    states[s].pos = s * 10; // stagger initial positions
-    states[s].seed = (uint8_t)(s * 73 + 37);
-  }
+  lastMicros = micros();
 }
 
 void loop() {
-  uint32_t now = millis();
+  unsigned long now = micros();
+  float dt = (now - lastMicros) / 1000000.0f;
+  if (dt <= 0.0f) dt = 0.001f;
+  lastMicros = now;
+  if (dt > 0.1f) dt = 0.1f;
 
-  // For each strip, decide whether it's time to advance that strip's state,
-  // and then render only that strip (keeps CPU work spread across frames).
-  for (int s=0; s<NUM_STRIPS_USED; s++) {
-    StripConfig &cfg = stripConfig[s];
-    StripState  &st  = states[s];
+  // fade previous frame -> creates trails
+  fadeBuffer();
 
-    // clamp speed: if 0, treat as immediate each loop
-    uint32_t period = max(1, cfg.speed);
+  // update stars (move horizontally only)
+  for (int i = 0; i < STAR_COUNT; i++) {
+    Star &s = stars[i];
+    s.x += s.vx * dt; // vx is columns/sec
 
-    if ((uint32_t)(now - st.lastUpdateMs) >= period) {
-      // advance logical position used by many effects
-      st.pos++;
-      st.seed ^= (uint8_t)(st.pos & 0xFF); // change seed slowly for sparkle
-      st.lastUpdateMs = now;
+    // render only if inside or near visible area
+    if (s.x > -2.0f && s.x < TOTAL_WIDTH + 2.0f) {
+      renderStarToBuffer(s);
+    }
 
-      // render this strip to the drawing buffer
-      updateStripFrame(s);
+    if (s.x > TOTAL_WIDTH + 1.0f) {
+      // off-screen
+      if (WRAP_STARS) {
+        s.x -= (TOTAL_WIDTH + 2.0f); // wrap left
+      } else {
+        resetStar(s, true);
+      }
     }
   }
 
-  // push buffer to LEDs (this triggers the DMA transfer for all strips)
+  // push to Octo drawing buffer and show
+  copyBufferToOcto();
   leds.show();
 
-  // Optional: small yield to let USB serial etc. run; tiny delay reduces CPU hogging
-  delay(1);
+  // frame pacing to target FRAME_TARGET_MS
+  unsigned long frameMicros = micros() - now;
+  unsigned long targetMicros = FRAME_TARGET_MS * 1000UL;
+  if (frameMicros < targetMicros)
+    delay((targetMicros - frameMicros) / 1000);
 }
