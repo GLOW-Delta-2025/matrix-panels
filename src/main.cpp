@@ -1,267 +1,232 @@
-#include <Arduino.h>
-#include <FastLED.h>
+// OctoWS2811 - Independent effects per output (5 curtains)
+// Change: LEDS_PER_STRIP, NUM_STRIPS_USED, and stripConfig[] to fit your setup.
+// If using Teensy 4.x with custom pins, enable USE_PINLIST and fill pinList[].
 
-// Pin definitions for 5 curtains
-#define LED_PIN_1 7
-#define LED_PIN_2 8
-#define LED_PIN_3 9
-#define LED_PIN_4 10
-#define LED_PIN_5 11
+#include <OctoWS2811.h>
 
-// Dimensions per curtain
-#define WIDTH 20
-#define HEIGHT 26
-#define NUM_LEDS_PER_CURTAIN (WIDTH * HEIGHT)
-#define NUM_CURTAINS 5
-#define TOTAL_WIDTH (WIDTH * NUM_CURTAINS)
-#define TOTAL_LEDS (NUM_LEDS_PER_CURTAIN * NUM_CURTAINS)
+// ---------------- USER CONFIG ----------------
+const int NUM_STRIPS_USED = 5;     // you said 5 curtains
+const int LEDS_PER_STRIP   = 520;  // <-- change to your curtain height
 
-#define LED_TYPE WS2811
-#define COLOR_ORDER GRB
+// If you use Teensy 4.x and want a custom pin mapping, set to true and edit pinList.
+// If false, the library uses default Octo pins (good with PJRC Octo adapter and Teensy 3.x).
+const bool USE_PINLIST = false;
+const byte pinListExample[NUM_STRIPS_USED] = { 2, 14, 7, 8, 6 }; // example pin mapping (change if needed)
+// ------------------------------------------------
 
-// LED arrays for each curtain
-CRGB leds1[NUM_LEDS_PER_CURTAIN];
-CRGB leds2[NUM_LEDS_PER_CURTAIN];
-CRGB leds3[NUM_LEDS_PER_CURTAIN];
-CRGB leds4[NUM_LEDS_PER_CURTAIN];
-CRGB leds5[NUM_LEDS_PER_CURTAIN];
+// --- OctoWS memory (do NOT change unless you know what you're doing) ---
+DMAMEM int displayMemory[LEDS_PER_STRIP * 6];
+int drawingMemory[LEDS_PER_STRIP * 6];
+const int config = WS2811_GRB | WS2811_800kHz;
 
-// Array of pointers for easy access
-CRGB* ledCurtains[NUM_CURTAINS] = {leds1, leds2, leds3, leds4, leds5};
+#if USE_PINLIST
+OctoWS2811 leds(LEDS_PER_STRIP, displayMemory, drawingMemory, config, NUM_STRIPS_USED, (byte*)pinListExample);
+#else
+OctoWS2811 leds(LEDS_PER_STRIP, displayMemory, drawingMemory, config);
+#endif
 
-// Visual parameters
-const uint8_t globalBrightness = 200;  // Reduced from 255 for faster updates
-const CRGB starColor = CRGB::Orange;
-
-// Timing - Optimized for 24 FPS
-const uint16_t targetFPS = 24;
-const uint16_t frameTimeUs = 1000000 / targetFPS;  // Microseconds per frame
-unsigned long lastFrameUs = 0;
-
-// Star system
-struct Star {
-    float x;      // sub-pixel horizontal position (0..TOTAL_WIDTH)
-    uint8_t y;    // row 0..HEIGHT-1
-    float vx;     // pixels per second
-    bool active;
+// ---------------- Effect system ----------------
+enum Effect {
+  EF_OFF = 0,
+  EF_SOLID,
+  EF_MOVING_DOT,
+  EF_RAINBOW,
+  EF_THEATER_CHASE,
+  EF_SPARKLE,
+  EF_GRADIENT_WIPE,
+  EF_COUNT
 };
 
-const uint8_t MAX_STARS = 8;  // Reduced slightly for performance
-Star stars[MAX_STARS];
+struct StripConfig {
+  Effect effect;
+  uint8_t r1, g1, b1; // primary color
+  uint8_t r2, g2, b2; // secondary color / accent
+  uint16_t speed;     // lower = faster (ms per step)
+};
 
-// Spawn control
-const uint16_t minSpawnIntervalMs = 200;
-const uint16_t maxSpawnIntervalMs = 500;
-unsigned long nextSpawnAtMs = 0;
+// per-strip configuration: set desired effect and colors here
+StripConfig stripConfig[NUM_STRIPS_USED] = {
+  { EF_RAINBOW,       255,0,0,   0,0,0,   20 },  // strip 0
+  { EF_MOVING_DOT,    0,255,0,   0,0,0,   10 },  // strip 1
+  { EF_THEATER_CHASE, 0,0,255,   60,60,60, 60 },  // strip 2
+  { EF_SPARKLE,       255,200,0, 0,0,0,   30 },  // strip 3
+  { EF_GRADIENT_WIPE, 255,0,255, 0,0,0,   25 }   // strip 4
+};
 
-// Motion and tails - Optimized
-const float minSpeedPxPerSec = 20.0f;
-const float maxSpeedPxPerSec = 32.0f;
-const uint8_t tailLength = 3;
-const uint8_t tailFalloff[3] = {255, 100, 35};
-const uint8_t frameFade = 45;  // Slightly increased for smoother fade
+// per-strip runtime state
+struct StripState {
+  uint32_t lastUpdateMs;
+  uint16_t pos;       // generic position counter
+  uint8_t  seed;      // for sparkle randomness
+} states[NUM_STRIPS_USED];
 
-// FPS measurement
-unsigned long frameCount = 0;
-unsigned long fpsTimer = 0;
-float currentFPS = 0.0;
-unsigned long maxFrameTime = 0;
-unsigned long totalFrameTime = 0;
-
-// Dirty rectangle tracking for optimization
-uint8_t minDirtyX = 255;
-uint8_t maxDirtyX = 0;
-bool hasDirtyPixels = false;
-
-// Optimized pixel setting with dirty tracking
-static inline void setPixelFast(int globalX, uint8_t y, CRGB color) {
-    if (globalX < 0 || globalX >= TOTAL_WIDTH) return;
-
-    uint8_t curtainIdx = globalX / WIDTH;
-    uint8_t localX = globalX % WIDTH;
-
-    // Track dirty regions
-    if (curtainIdx < minDirtyX) minDirtyX = curtainIdx;
-    if (curtainIdx > maxDirtyX) maxDirtyX = curtainIdx;
-    hasDirtyPixels = true;
-
-    // Direct array access (faster than function calls)
-    uint16_t idx = localX * HEIGHT + y;
-    ledCurtains[curtainIdx][idx] += color;
+// utility: color wheel (0..255) -> 24-bit RGB
+uint32_t colorWheel(uint8_t pos) {
+  pos = 255 - pos;
+  if (pos < 85) return ((255 - pos * 3) << 16) | (0 << 8) | (pos * 3);
+  if (pos < 170) { pos -= 85; return ((0) << 16) | ((pos*3) << 8) | (255 - pos*3); }
+  pos -= 170; return ((pos*3) << 16) | ((255 - pos*3) << 8) | 0;
 }
 
-static inline uint16_t fastRand16(uint16_t max) {
-    return (uint16_t)(((uint32_t)random() * max) >> 15);
+inline void setStripPixelColor(int stripIndex, int pixelIndex, uint8_t r, uint8_t g, uint8_t b) {
+  if (stripIndex < 0 || stripIndex >= NUM_STRIPS_USED || pixelIndex < 0 || pixelIndex >= LEDS_PER_STRIP) return;
+  int globalIndex = stripIndex * LEDS_PER_STRIP + pixelIndex;
+  leds.setPixel(globalIndex, r, g, b);
 }
 
-static inline float fastRandFloat(float min, float max) {
-    return min + (float)random() / (float)RAND_MAX * (max - min);
+inline void clearStrip(int s) {
+  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i,0,0,0);
 }
 
-void resetStar(Star &s) {
-    s.active = false;
+// EFFECT IMPLEMENTATIONS:
+// Each function fills only pixels for strip `s`. Use stripConfig[s] for parameters and states[s] for runtime.
+
+void effect_off(int s) {
+  clearStrip(s);
 }
 
-void spawnStarIfDue(unsigned long nowMs) {
-    if (nowMs < nextSpawnAtMs) return;
+void effect_solid(int s) {
+  auto &cfg = stripConfig[s];
+  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i,cfg.r1,cfg.g1,cfg.b1);
+}
 
-    // Find free slot
-    for (uint8_t i = 0; i < MAX_STARS; i++) {
-        if (!stars[i].active) {
-            stars[i].active = true;
-            stars[i].x = 0.0f;
-            stars[i].y = fastRand16(HEIGHT);
-            stars[i].vx = fastRandFloat(minSpeedPxPerSec, maxSpeedPxPerSec);
-            break;
-        }
+void effect_moving_dot(int s) {
+  auto &cfg = stripConfig[s];
+  StripState &st = states[s];
+  // move 1 pixel down the curtain
+  int pos = st.pos % LEDS_PER_STRIP;
+  clearStrip(s);
+  // tail pixels for nicer look
+  int tail = 4;
+  for (int i=0;i<tail;i++) {
+    int p = pos - i;
+    if (p < 0) p += LEDS_PER_STRIP; // wrap
+    uint8_t scale = 255 - (i * (255 / (tail+1)));
+    setStripPixelColor(s, p, (cfg.r1 * scale) >> 8, (cfg.g1 * scale) >> 8, (cfg.b1 * scale) >> 8);
+  }
+  // advance position handled by caller timing
+}
+
+void effect_rainbow(int s) {
+  // scrolling rainbow down the curtain
+  StripState &st = states[s];
+  for (int i=0;i<LEDS_PER_STRIP;i++) {
+    uint8_t wheelPos = (uint8_t)((i + st.pos) & 255);
+    uint32_t col = colorWheel(wheelPos);
+    setStripPixelColor(s, i, (col>>16)&0xFF, (col>>8)&0xFF, col&0xFF);
+  }
+}
+
+void effect_theater_chase(int s) {
+  auto &cfg = stripConfig[s];
+  StripState &st = states[s];
+  // simple theater chase: on/off pattern moving down
+  int q = st.pos % 3;
+  for (int i=0;i<LEDS_PER_STRIP;i++) {
+    if ((i + q) % 3 == 0) setStripPixelColor(s,i,cfg.r1,cfg.g1,cfg.b1);
+    else setStripPixelColor(s,i,0,0,0);
+  }
+}
+
+void effect_sparkle(int s) {
+  auto &cfg = stripConfig[s];
+  StripState &st = states[s];
+  // mostly background color dim, with random sparkles
+  uint8_t bgdim = 20;
+  for (int i=0;i<LEDS_PER_STRIP;i++) setStripPixelColor(s,i, (cfg.r1*bgdim)>>8, (cfg.g1*bgdim)>>8, (cfg.b1*bgdim)>>8 );
+  // create a few sparkles based on seed
+  uint8_t sparks = 3;
+  uint16_t seed = (st.seed << 8) | (st.pos & 0xFF);
+  for (int k=0;k<sparks;k++) {
+    // simple LCG
+    seed = (uint16_t)(seed * 109 + 89);
+    int p = seed % LEDS_PER_STRIP;
+    // brighter pixel
+    setStripPixelColor(s, p, cfg.r1, cfg.g1, cfg.b1);
+  }
+}
+
+void effect_gradient_wipe(int s) {
+  auto &cfg = stripConfig[s];
+  StripState &st = states[s];
+  int limit = st.pos % (LEDS_PER_STRIP + 1);
+  for (int i=0;i<LEDS_PER_STRIP;i++) {
+    if (i < limit) {
+      // blend r1..r2 across filled region
+      float t = (limit <= 1) ? 0.0f : float(i) / float(max(1, limit-1));
+      uint8_t r = uint8_t((1.0f - t) * cfg.r2 + t * cfg.r1);
+      uint8_t g = uint8_t((1.0f - t) * cfg.g2 + t * cfg.g1);
+      uint8_t b = uint8_t((1.0f - t) * cfg.b2 + t * cfg.b1);
+      setStripPixelColor(s, i, r,g,b);
+    } else {
+      setStripPixelColor(s, i, 0,0,0);
     }
-
-    nextSpawnAtMs = nowMs + minSpawnIntervalMs + fastRand16(maxSpawnIntervalMs - minSpawnIntervalMs);
+  }
 }
 
-void updateAndRenderStars(float dtSec) {
-    // Reset dirty tracking
-    minDirtyX = 255;
-    maxDirtyX = 0;
-    hasDirtyPixels = false;
-
-    // Fade only dirty curtains from previous frame
-    static uint8_t lastMinDirty = 0, lastMaxDirty = NUM_CURTAINS - 1;
-    for (uint8_t c = lastMinDirty; c <= lastMaxDirty && c < NUM_CURTAINS; c++) {
-        fadeToBlackBy(ledCurtains[c], NUM_LEDS_PER_CURTAIN, frameFade);
-    }
-
-    // Combined update and render pass
-    for (uint8_t i = 0; i < MAX_STARS; i++) {
-        if (!stars[i].active) continue;
-
-        // Update position
-        stars[i].x += stars[i].vx * dtSec;
-
-        // Check bounds
-        if (stars[i].x >= (float)(TOTAL_WIDTH + tailLength)) {
-            resetStar(stars[i]);
-            continue;
-        }
-
-        // Render immediately after update (better cache locality)
-        int headX = (int)stars[i].x;
-        uint8_t y = stars[i].y;
-
-        // Unrolled tail loop for speed
-        if (headX >= 0 && headX < TOTAL_WIDTH) {
-            CRGB c = starColor;
-            c.nscale8_video(tailFalloff[0]);
-            setPixelFast(headX, y, c);
-        }
-
-        if (headX - 1 >= 0 && headX - 1 < TOTAL_WIDTH) {
-            CRGB c = starColor;
-            c.nscale8_video(tailFalloff[1]);
-            setPixelFast(headX - 1, y, c);
-        }
-
-        if (headX - 2 >= 0 && headX - 2 < TOTAL_WIDTH) {
-            CRGB c = starColor;
-            c.nscale8_video(tailFalloff[2]);
-            setPixelFast(headX - 2, y, c);
-        }
-    }
-
-    // Store dirty region for next frame
-    lastMinDirty = minDirtyX;
-    lastMaxDirty = maxDirtyX;
+// update dispatch
+void updateStripFrame(int s) {
+  switch (stripConfig[s].effect) {
+    case EF_OFF: effect_off(s); break;
+    case EF_SOLID: effect_solid(s); break;
+    case EF_MOVING_DOT: effect_moving_dot(s); break;
+    case EF_RAINBOW: effect_rainbow(s); break;
+    case EF_THEATER_CHASE: effect_theater_chase(s); break;
+    case EF_SPARKLE: effect_sparkle(s); break;
+    case EF_GRADIENT_WIPE: effect_gradient_wipe(s); break;
+    default: effect_off(s); break;
+  }
 }
 
+// ---------------- setup / loop ----------------
 void setup() {
-    // Initialize Serial for monitoring
-    Serial.begin(115200);
-    Serial.println(F("LED Curtain - Optimized for 24 FPS"));
-    Serial.print(F("Total LEDs: "));
-    Serial.println(TOTAL_LEDS);
+  Serial.begin(115200);
+  while (!Serial) { } // wait for serial (Teensy)
+  Serial.println("OctoWS2811 - per-strip effects example (5 curtains)");
+  #if USE_PINLIST
+    Serial.println("Using custom pinList");
+  #else
+    Serial.println("Using default Octo pins (PJRC Octo adapter or Teensy default mapping)");
+  #endif
 
-    // Configure FastLED for performance
-    FastLED.setMaxRefreshRate(targetFPS);
-    FastLED.setCorrection(TypicalLEDStrip);
-    FastLED.setDither(0);  // Disable dithering for speed
+  leds.begin();
+  leds.show(); // blank initially
+  delay(50);
 
-    // Initialize all LED strips
-    FastLED.addLeds<LED_TYPE, LED_PIN_1, COLOR_ORDER>(leds1, NUM_LEDS_PER_CURTAIN);
-    FastLED.addLeds<LED_TYPE, LED_PIN_2, COLOR_ORDER>(leds2, NUM_LEDS_PER_CURTAIN);
-    FastLED.addLeds<LED_TYPE, LED_PIN_3, COLOR_ORDER>(leds3, NUM_LEDS_PER_CURTAIN);
-    FastLED.addLeds<LED_TYPE, LED_PIN_4, COLOR_ORDER>(leds4, NUM_LEDS_PER_CURTAIN);
-    FastLED.addLeds<LED_TYPE, LED_PIN_5, COLOR_ORDER>(leds5, NUM_LEDS_PER_CURTAIN);
-
-    FastLED.clear(true);
-    FastLED.setBrightness(globalBrightness);
-
-    // Initialize RNG with better seed
-    randomSeed(analogRead(0) + analogRead(1) * 256);
-
-    // Initialize stars
-    for (uint8_t i = 0; i < MAX_STARS; i++) {
-        resetStar(stars[i]);
-    }
-
-    nextSpawnAtMs = millis();
-    fpsTimer = millis();
-    lastFrameUs = micros();
+  // init states
+  for (int s=0;s<NUM_STRIPS_USED;s++) {
+    states[s].lastUpdateMs = millis();
+    states[s].pos = s * 10; // stagger initial positions
+    states[s].seed = (uint8_t)(s * 73 + 37);
+  }
 }
 
 void loop() {
-    unsigned long nowUs = micros();
-    unsigned long frameStartMs = millis();
+  uint32_t now = millis();
 
-    // Calculate precise delta time
-    float dtSec = (float)(nowUs - lastFrameUs) / 1000000.0f;
-    lastFrameUs = nowUs;
+  // For each strip, decide whether it's time to advance that strip's state,
+  // and then render only that strip (keeps CPU work spread across frames).
+  for (int s=0; s<NUM_STRIPS_USED; s++) {
+    StripConfig &cfg = stripConfig[s];
+    StripState  &st  = states[s];
 
-    // Update and render in one pass
-    spawnStarIfDue(frameStartMs);
-    updateAndRenderStars(dtSec);
+    // clamp speed: if 0, treat as immediate each loop
+    uint32_t period = max(1, cfg.speed);
 
-    // Show the LEDs
-    unsigned long showStart = micros();
-    FastLED.show();
-    unsigned long showTime = micros() - showStart;
+    if ((uint32_t)(now - st.lastUpdateMs) >= period) {
+      // advance logical position used by many effects
+      st.pos++;
+      st.seed ^= (uint8_t)(st.pos & 0xFF); // change seed slowly for sparkle
+      st.lastUpdateMs = now;
 
-    // FPS calculation and reporting
-    frameCount++;
-    if (frameStartMs - fpsTimer >= 1000) {
-        currentFPS = frameCount * 1000.0 / (frameStartMs - fpsTimer);
-
-        Serial.print(F("FPS: "));
-        Serial.print(currentFPS, 1);
-        Serial.print(F(" | Target: "));
-        Serial.print(targetFPS);
-        Serial.print(F(" | Show: "));
-        Serial.print(showTime / 1000.0, 1);
-        Serial.print(F("ms | Max frame: "));
-        Serial.print(maxFrameTime / 1000.0, 1);
-        Serial.print(F("ms | Avg: "));
-        Serial.print((totalFrameTime / frameCount) / 1000.0, 1);
-        Serial.println(F("ms"));
-
-        frameCount = 0;
-        fpsTimer = frameStartMs;
-        maxFrameTime = 0;
-        totalFrameTime = 0;
+      // render this strip to the drawing buffer
+      updateStripFrame(s);
     }
+  }
 
-    // Track frame time
-    unsigned long frameTime = micros() - nowUs;
-    totalFrameTime += frameTime;
-    if (frameTime > maxFrameTime) maxFrameTime = frameTime;
+  // push buffer to LEDs (this triggers the DMA transfer for all strips)
+  leds.show();
 
-    // Precise frame timing - only delay if we're ahead of schedule
-    unsigned long targetNextFrame = lastFrameUs + frameTimeUs;
-    if (micros() < targetNextFrame) {
-        // Use delayMicroseconds for precision
-        unsigned long delayNeeded = targetNextFrame - micros();
-        if (delayNeeded > 16383) {
-            delay(delayNeeded / 1000);
-        } else if (delayNeeded > 0) {
-            delayMicroseconds(delayNeeded);
-        }
-    }
+  // Optional: small yield to let USB serial etc. run; tiny delay reduces CPU hogging
+  delay(1);
 }
