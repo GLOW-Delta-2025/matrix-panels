@@ -1,0 +1,24 @@
+#include "../include/config.h"
+
+// per-curtain inversion (change as-needed)
+bool invertCurtain[CURTAINS] = { false, false, false, false, false };
+
+// runtime tunables default values
+const int MAX_STARS = 500; // maximum alloc size - change higher if you have RAM
+int activeStarCount = 15; // initial active stars (<= MAX_STARS)
+
+
+float minSpeedColsPerSec = 10.0f;
+float maxSpeedColsPerSec = 100.0f;
+float fadeFactor = 0.86f;
+unsigned long frameTargetMs = 20; // ~50 FPS
+bool randomRows = true;
+bool wrapStars = false;
+
+uint8_t STAR_R = 255;
+uint8_t STAR_G = 191;
+uint8_t STAR_B = 0;
+
+
+// pin list - only used when USE_PINLIST is true
+const byte pinList[CURTAINS] = { 2, 14, 7, 8, 6 };
