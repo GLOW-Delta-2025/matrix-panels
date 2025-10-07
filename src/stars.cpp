@@ -47,12 +47,29 @@ static void renderStarToBuffer(const Star &s) {
   float wl = 1.0f - frac;
   float wr = frac;
   float br = s.bright;
-  float rL = STAR_R * br * wl;
-  float gL = STAR_G * br * wl;
-  float bL = STAR_B * br * wl;
-  float rR = STAR_R * br * wr;
-  float gR = STAR_G * br * wr;
-  float bR = STAR_B * br * wr;
+
+  uint8_t r, g, b;
+
+  if (s.r != 0 || s.g != 0 || s.b != 0 && (s.r != STAR_R || s.g != STAR_G || s.b != STAR_B)) {
+    Serial.println("Star has custom color");
+    Serial.println(s.r);
+    Serial.println(s.g);
+    Serial.println(s.b);
+    r = s.r;
+    g = s.g;
+    b = s.b;
+  } else {
+    r = STAR_R;
+    g = STAR_G;
+    b = STAR_B;
+  }
+
+  float rL = r * br * wl;
+  float gL = g * br * wl;
+  float bL = b * br * wl;
+  float rR = r * br * wr;
+  float gR = g * br * wr;
+  float bR = b * br * wr;
 
   if (leftCol >= 0 && leftCol < TOTAL_WIDTH) {
     int curtainL = leftCol / CURTAIN_WIDTH;
@@ -104,6 +121,9 @@ bool addStar() {
   resetStar(s, true);
   // start slightly left so the star slides in smoothly
   s.x = - (random(0, 50) / 25.0f);
+  s.r = 0;
+  s.g = 0;
+  s.b = 0;
   activeStarCount++;
   return true;
 }
