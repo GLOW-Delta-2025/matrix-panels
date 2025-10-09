@@ -3,20 +3,21 @@
 
 #include "base_command_handler.h"
 
-class StarCommandHandler : public BaseCommandHandler {
+class ClimaxCommandHandler : public BaseCommandHandler {
 public:
     bool canHandle(const String &command) const override {
-        return (command == "ADD_STAR");
+        return command == "BUILDUP_CLIMAX_CENTER" || command == "START_CLIMAX_CENTER";
     }
     
     String getName() const override {
-        return "StarHandler";
+        return "ClimaxHandler";
     }
     
     void handle(const cmdlib::Command &cmd, cmdlib::Command &response) override;
 
 private:
-    void handleAdd(const cmdlib::Command &cmd, cmdlib::Command &response);
+    void handleBuildUp(const cmdlib::Command &cmd, cmdlib::Command &response);
+    void handleStart(const cmdlib::Command &cmd, cmdlib::Command &response);
 };
 
 #endif // STAR_COMMAND_HANDLER_H

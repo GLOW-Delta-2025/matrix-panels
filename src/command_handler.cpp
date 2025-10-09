@@ -12,6 +12,13 @@ static String cmdBuffer = "";
 static BaseCommandHandler* handlers[20];
 static int handlerCount = 0;
 
+// Helper to build error response
+void buildError(cmdlib::Command &resp, const String &command, const String &message) {
+    resp.command = command;
+    resp.msgKind = "ERROR";
+    resp.setNamed("message", message);
+}
+
 void registerHandler(BaseCommandHandler *handler) {
     handlers[handlerCount++] = handler;
     Serial.print("Registered handler: ");
@@ -45,24 +52,10 @@ void processSerialCommands() {
                 handleCommand(cmd);
             } else {
                 cmdlib::Command errResp;
-                errResp.type = "error";
-                errResp.command = "response";
-                errResp.setParam("status", "parse_failed");
-                errResp.setParam("message", error);
+                buildError(errResp, cmd.command, "Parse failed: " + error);
                 sendResponse(errResp);
             }
 
-            cmdBuffer = "";
-        }
-
-        // Prevent buffer overflow
-        if (cmdBuffer.length() > 256) {
-            cmdlib::Command errResp;
-            errResp.type = "error";
-            errResp.command = "response";
-            errResp.setParam("status", "buffer_overflow");
-            errResp.setParam("message", "Command too long");
-            sendResponse(errResp);
             cmdBuffer = "";
         }
     }
@@ -81,10 +74,9 @@ void handleCommand(const cmdlib::Command &cmd) {
 
     // No handler found
     cmdlib::Command response;
-    response.type = "error";
-    response.command = "response";
-    response.setParam("status", "unknown_type");
-    response.setParam("message", "No handler for type: " + cmd.type);
+    response.msgKind = "ERROR";
+    response.command = cmd.command;
+    response.setNamed("message", "No handler for type: " + cmd.command);
     sendResponse(response);
 }
 

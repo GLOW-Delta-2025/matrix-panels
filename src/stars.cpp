@@ -115,15 +115,11 @@ void updateAndRenderStars(float dt) {
   }
 }
 
-
 bool addStar() {
   Star &s = starsArr[activeStarCount];
   resetStar(s, true);
   // start slightly left so the star slides in smoothly
   s.x = - (random(0, 50) / 25.0f);
-  s.r = 0;
-  s.g = 0;
-  s.b = 0;
   activeStarCount++;
   return true;
 }
