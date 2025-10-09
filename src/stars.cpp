@@ -123,3 +123,30 @@ bool addStar() {
   activeStarCount++;
   return true;
 }
+
+
+bool addStar(int row, float vx, float bright, uint8_t r, uint8_t g, uint8_t b) {
+  if (activeStarCount >= MAX_STARS) return false;
+
+  Star &s = starsArr[activeStarCount];
+
+  // Set custom properties
+  s.x = - (random(0, 50) / 25.0f); // start slightly left
+  s.row = row;
+  s.vx = vx;
+  s.bright = bright;
+  s.r = r;
+  s.g = g;
+  s.b = b;
+
+  // Validate and clamp values
+  if (s.row < 0) s.row = 0;
+  if (s.row >= CURTAIN_HEIGHT) s.row = CURTAIN_HEIGHT - 1;
+  if (s.bright < 0) s.bright = 0;
+  if (s.bright > 1) s.bright = 1;
+  if (s.vx <= 0) s.vx = minSpeedColsPerSec;
+
+  activeStarCount++;
+  return true;
+}
+

@@ -9,8 +9,6 @@ unsigned long lastMicros = 0;
 void setup() {
   commandHandlerInit();
 
-  Serial.println("OctoStars starting...");
-
   rendererInit();
   starsInit();
   octoBegin();

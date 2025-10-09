@@ -20,7 +20,7 @@ public:
 
 protected:
     // Helper to build response
-    void buildResponse(cmdlib::Command &resp, const String &command, const String &header) {
+    void buildResponse(cmdlib::Command &resp, const String &command, const String &header = "") {
         if (header != "" )
             resp.addHeader(header);
         resp.msgKind = "CONFIRM";
