@@ -49,20 +49,20 @@ static void renderStarToBuffer(const Star &s) {
   float br = s.bright;
 
   uint8_t r, g, b;
-
-  if (s.r != 0 || s.g != 0 || s.b != 0 && (s.r != STAR_R || s.g != STAR_G || s.b != STAR_B)) {
-    Serial.println("Star has custom color");
-    Serial.println(s.r);
-    Serial.println(s.g);
-    Serial.println(s.b);
-    r = s.r;
-    g = s.g;
-    b = s.b;
-  } else {
+  //
+  // if (s.r != 0 || s.g != 0 || s.b != 0 && (s.r != STAR_R || s.g != STAR_G || s.b != STAR_B)) {
+  //   Serial.println("Star has custom color");
+  //   Serial.println(s.r);
+  //   Serial.println(s.g);
+  //   Serial.println(s.b);
+  //   r = s.r;
+  //   g = s.g;
+  //   b = s.b;
+  // } else {
     r = STAR_R;
     g = STAR_G;
     b = STAR_B;
-  }
+  // }
 
   float rL = r * br * wl;
   float gL = g * br * wl;

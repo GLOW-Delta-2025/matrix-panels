@@ -1,5 +1,5 @@
-#ifndef STAR_COMMAND_HANDLER_H
-#define STAR_COMMAND_HANDLER_H
+#ifndef CLIMAX_COMMAND_HANDLER_H
+#define CLIMAX_COMMAND_HANDLER_H
 
 #include "base_command_handler.h"
 
@@ -20,4 +20,4 @@ private:
     void handleStart(const cmdlib::Command &cmd, cmdlib::Command &response);
 };
 
-#endif // STAR_COMMAND_HANDLER_H
+#endif // CLIMAX_COMMAND_HANDLER_H

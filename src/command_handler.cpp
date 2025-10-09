@@ -1,9 +1,6 @@
 #include "command_handler.h"
-#include "../include/commands/config_command_handler.h"
-#include "commands/star_command_handler.h"
-// Include other handlers here as you create them
-// #include "star_command_handler.h"
-// #include "system_command_handler.h"
+#include "../include/commands/star_command_handler.h"
+#include "../include/commands/climax_command_handler.h"
 
 // Serial command buffer
 static String cmdBuffer = "";
@@ -30,12 +27,11 @@ void commandHandlerInit() {
     while (!Serial && millis() < 3000) {}
     // Wait up to 3 seconds for serial
 
-    // Register all handlers
-    static ConfigCommandHandler configHandler;
-    registerHandler(&configHandler);
 
     static StarCommandHandler starHandler;
     registerHandler(&starHandler);
+    static ClimaxCommandHandler climaxHandler;
+    registerHandler(&climaxHandler);
 }
 
 void processSerialCommands() {

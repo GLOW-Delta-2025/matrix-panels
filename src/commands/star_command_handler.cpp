@@ -43,5 +43,5 @@ void StarCommandHandler::handleAdd(const cmdlib::Command &cmd, cmdlib::Command &
             added++;
         }
     }
-    buildResponse(response, cmd.command);
+    buildResponse(response, cmd.command, "");
 }
