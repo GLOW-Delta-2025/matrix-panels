@@ -37,9 +37,30 @@ void commandHandlerInit() {
 void processSerialCommands() {
     while (Serial.available() > 0) {
         char c = Serial.read();
+
+        // If buffer is empty, wait for the start sequence "!!"
+        if (cmdBuffer.length() == 0) {
+            // Shift in chars until we detect "!!"
+            static String startDetect = "";
+            startDetect += c;
+
+            if (startDetect.length() > 2) {
+                startDetect.remove(0, 1); // keep only last 2 chars
+            }
+
+            if (startDetect == "!!") {
+                cmdBuffer = "!!"; // start the buffer with "!!"
+                startDetect = ""; // reset
+            }
+
+            // don't add anything else until we find "!!"
+            continue;
+        }
+
+        // If we're already capturing the command, just append
         cmdBuffer += c;
 
-        // Check for complete command
+        // Check for end of command "##"
         if (cmdBuffer.endsWith("##")) {
             cmdlib::Command cmd;
             String error;
@@ -49,6 +70,7 @@ void processSerialCommands() {
             } else {
                 cmdlib::Command errResp;
                 buildError(errResp, cmd.command, "Parse failed: " + error);
+                Serial.println(cmdBuffer);
                 sendResponse(errResp);
             }
 
@@ -56,6 +78,7 @@ void processSerialCommands() {
         }
     }
 }
+
 
 void handleCommand(const cmdlib::Command &cmd) {
     // Try each registered handler
