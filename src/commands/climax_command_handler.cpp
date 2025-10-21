@@ -2,17 +2,50 @@
 #include "config.h"
 #include "stars.h"
 
-// Global state for climax animations
-static bool climaxBuildupActive = false;
-static bool climaxSpiralActive = false;
-static unsigned long climaxStartTime = 0;
-static float climaxDuration = 0;
-static float targetSpeedMultiplier = 1.0f;
-static float originalMinSpeed = 0;
-static float originalMaxSpeed = 0;
-static int* originalRows = nullptr;
-static float* originalStarSpeeds = nullptr;  // Store original star speeds
+#include <stdlib.h>
+#include <math.h>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Global state for climax animations
+// ─────────────────────────────────────────────────────────────────────────────
+static bool           climaxBuildupActive   = false;
+static bool           climaxSpiralActive    = false;
+static unsigned long  climaxStartTime       = 0;
+static float          climaxDuration        = 0;        // milliseconds
+static float          targetSpeedMultiplier = 1.0f;     // reused as spiralSpeed during spiral mode
+static float          originalMinSpeed      = 0;
+static float          originalMaxSpeed      = 0;
+
+static int*           originalRows          = nullptr;  // per-star starting row (for time-based lerp)
+static float*         originalStarSpeeds    = nullptr;  // per-star horizontal speed backup
+static float*         originalBrightness    = nullptr;  // per-star starting brightness
+
+// Extra control for slight vertical emphasis on very wide matrices
+static float          verticalBias          = 1.0f;     // small bias to increase perceived upward motion
+
+// For optional buildup (kept from your original)
+static float          originalFadeFactor    = 0;
+static int            buildupStarsAdded     = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: Clear all stars + (optionally) the physical LEDs
+// ─────────────────────────────────────────────────────────────────────────────
+static inline void clearAllStarsAndLeds() {
+    if (starsArr) {
+        for (int i = 0; i < activeStarCount; i++) {
+            starsArr[i].bright = 0.0f;
+        }
+    }
+    activeStarCount = 0;
+
+    // If you have a dedicated LED clear function in your renderer, call it:
+    // extern void clearAllLeds();
+    // clearAllLeds();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Command handling
+// ─────────────────────────────────────────────────────────────────────────────
 void ClimaxCommandHandler::handle(const cmdlib::Command &cmd, cmdlib::Command &response) {
     if (cmd.command == "BUILDUP_CLIMAX_CENTER") {
         handleBuildUp(cmd, response);
@@ -20,11 +53,6 @@ void ClimaxCommandHandler::handle(const cmdlib::Command &cmd, cmdlib::Command &r
         handleStart(cmd, response);
     }
 }
-
-// Global variables for enhanced buildup effect
-static float originalFadeFactor = 0;
-static float* originalBrightness = nullptr;
-static int buildupStarsAdded = 0;
 
 void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Command &response) {
     // Parse duration parameter (in seconds)
@@ -41,27 +69,21 @@ void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Com
     }
 
     // Store original speeds and fade factor
-    originalMinSpeed = minSpeedColsPerSec;
-    originalMaxSpeed = maxSpeedColsPerSec;
+    originalMinSpeed   = minSpeedColsPerSec;
+    originalMaxSpeed   = maxSpeedColsPerSec;
     originalFadeFactor = fadeFactor;
 
-    // Allocate memory for original star speeds and brightness if needed
-    if (!originalStarSpeeds) {
-        originalStarSpeeds = (float*) malloc(sizeof(float) * MAX_STARS);
-    }
-    if (!originalBrightness) {
-        originalBrightness = (float*) malloc(sizeof(float) * MAX_STARS);
-    }
-    if (!originalRows) {
-        originalRows = (int*) malloc(sizeof(int) * MAX_STARS);
-    }
+    // Allocate memory for backups
+    if (!originalStarSpeeds) originalStarSpeeds = (float*) malloc(sizeof(float) * MAX_STARS);
+    if (!originalBrightness) originalBrightness = (float*) malloc(sizeof(float) * MAX_STARS);
+    if (!originalRows)       originalRows       = (int*)   malloc(sizeof(int)   * MAX_STARS);
 
-    // Store each star's original speed, brightness, and row
+    // Store per-star originals
     if (starsArr && originalStarSpeeds && originalBrightness && originalRows) {
         for (int i = 0; i < activeStarCount; i++) {
             originalStarSpeeds[i] = starsArr[i].vx;
-            originalBrightness[i] = starsArr[i].bright;
-            originalRows[i] = starsArr[i].row;
+            originalBrightness[i]  = starsArr[i].bright;
+            originalRows[i]        = starsArr[i].row;
         }
     }
 
@@ -70,9 +92,9 @@ void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Com
 
     // Activate buildup mode
     climaxBuildupActive = true;
-    climaxSpiralActive = false;
-    climaxStartTime = millis();
-    climaxDuration = duration * 1000.0f; // Convert to milliseconds
+    climaxSpiralActive  = false;
+    climaxStartTime     = millis();
+    climaxDuration      = duration * 1000.0f; // ms
 
     buildResponse(response, cmd.command);
 }
@@ -85,94 +107,92 @@ void ClimaxCommandHandler::handleStart(const cmdlib::Command &cmd, cmdlib::Comma
         return;
     }
 
-    // Parse spiral speed (how fast stars move upward)
-    float spiralSpeed = cmd.getNamed("spiralSpeed", "0.5").toFloat(); // rows per second
+    // Parse spiral "wobble" speed (only affects the slight vertical wobble, not the time-based climb)
+    float spiralSpeed = cmd.getNamed("spiralSpeed", "0.5").toFloat(); // rows per second influence
     if (spiralSpeed <= 0 || spiralSpeed > 5.0f) {
         spiralSpeed = 0.5f;
     }
 
-    // Parse horizontal speed multiplier
+    // Parse horizontal speed multiplier (kept for your star field's x-velocity feel)
     float speedMultiplier = cmd.getNamed("speedMultiplier", "5.0").toFloat();
     if (speedMultiplier < 1.0f || speedMultiplier > 10.0f) {
         speedMultiplier = 5.0f;
     }
 
-    // Store original speeds and positions
+    // Slight extra push for very wide canvases (optional)
+    verticalBias = cmd.getNamed("verticalBias", "1.2").toFloat();
+    if (verticalBias < 1.0f) verticalBias = 1.0f;
+
+    // Store original global speeds
     originalMinSpeed = minSpeedColsPerSec;
     originalMaxSpeed = maxSpeedColsPerSec;
 
-    // Allocate memory to store original row positions and speeds if needed
-    if (!originalRows) {
-        originalRows = (int*) malloc(sizeof(int) * MAX_STARS);
-    }
-    if (!originalStarSpeeds) {
-        originalStarSpeeds = (float*) malloc(sizeof(float) * MAX_STARS);
-    }
+    // Allocate backups
+    if (!originalRows)       originalRows       = (int*)   malloc(sizeof(int)   * MAX_STARS);
+    if (!originalStarSpeeds) originalStarSpeeds = (float*) malloc(sizeof(float) * MAX_STARS);
+    if (!originalBrightness) originalBrightness = (float*) malloc(sizeof(float) * MAX_STARS);
 
-    // Store original row positions and speeds, then set high speeds
+    // Backup per-star data + apply horizontal speed boost
     if (starsArr && originalRows && originalStarSpeeds) {
         for (int i = 0; i < activeStarCount; i++) {
-            originalRows[i] = starsArr[i].row;
-            originalStarSpeeds[i] = starsArr[i].vx;
-            // Set high horizontal speed based on original
-            starsArr[i].vx = originalStarSpeeds[i] * speedMultiplier;
+            originalRows[i]        = starsArr[i].row;
+            originalStarSpeeds[i]  = starsArr[i].vx;
+            originalBrightness[i]  = starsArr[i].bright;
+            starsArr[i].vx         = originalStarSpeeds[i] * speedMultiplier;
         }
     }
 
-    // Set global speeds to high values
+    // Set global speeds to high values for horizontal motion feel
     minSpeedColsPerSec = originalMinSpeed * speedMultiplier;
     maxSpeedColsPerSec = originalMaxSpeed * speedMultiplier;
 
     // Activate spiral mode
-    climaxSpiralActive = true;
-    climaxBuildupActive = false;
-    climaxStartTime = millis();
-    climaxDuration = duration * 1000.0f;
-    targetSpeedMultiplier = spiralSpeed; // Reuse variable for spiral speed
+    climaxSpiralActive    = true;
+    climaxBuildupActive   = false;
+    climaxStartTime       = millis();
+    climaxDuration        = duration * 1000.0f; // ms
+    targetSpeedMultiplier = spiralSpeed;        // wobble influence
 
     buildResponse(response, cmd.command);
 }
 
-// This function should be called from the main loop to update climax effects
+// ─────────────────────────────────────────────────────────────────────────────
+// Main updater
+// ─────────────────────────────────────────────────────────────────────────────
 void updateClimaxEffects() {
     if (!climaxBuildupActive && !climaxSpiralActive) return;
 
-    unsigned long now = millis();
+    unsigned long now     = millis();
     unsigned long elapsed = now - climaxStartTime;
 
     if (climaxBuildupActive) {
         if (elapsed < climaxDuration) {
-            float progress = elapsed / climaxDuration;
+            float progress = (climaxDuration > 0.0f) ? (float)elapsed / climaxDuration : 1.0f;
             float speedMultiplier;
 
-            // First 70%: gradual acceleration
-            // Last 30%: full speed
+            // First 70%: gradual acceleration; last 30%: full speed
             if (progress < 0.7f) {
-                // Gradual acceleration from 1.0 to target over first 70%
-                float accelProgress = progress / 0.7f; // 0 to 1 over first 70%
+                float accelProgress = progress / 0.7f; // 0..1
                 speedMultiplier = 1.0f + (targetSpeedMultiplier - 1.0f) * accelProgress;
             } else {
-                // Full target speed for last 30%
                 speedMultiplier = targetSpeedMultiplier;
             }
 
-            // Apply speed multiplier to global speeds
+            // Apply to globals
             minSpeedColsPerSec = originalMinSpeed * speedMultiplier;
             maxSpeedColsPerSec = originalMaxSpeed * speedMultiplier;
 
-            // Update existing star speeds based on ORIGINAL speeds
+            // Apply to stars based on ORIGINAL speeds
             if (starsArr && originalStarSpeeds) {
                 for (int i = 0; i < activeStarCount; i++) {
-                    // Set speed based on original speed, not current speed
                     starsArr[i].vx = originalStarSpeeds[i] * speedMultiplier;
                 }
             }
         } else {
-            // Buildup complete - restore original speeds
+            // Restore
             minSpeedColsPerSec = originalMinSpeed;
             maxSpeedColsPerSec = originalMaxSpeed;
 
-            // Restore original star speeds
             if (starsArr && originalStarSpeeds) {
                 for (int i = 0; i < activeStarCount; i++) {
                     starsArr[i].vx = originalStarSpeeds[i];
@@ -185,66 +205,90 @@ void updateClimaxEffects() {
 
     if (climaxSpiralActive) {
         if (elapsed < climaxDuration) {
-            float dt = (elapsed > 0) ? 0.02f : 0; // Assume ~50 FPS
-            float rowsPerFrame = targetSpeedMultiplier * dt; // targetSpeedMultiplier holds spiral speed
+            // Normalized progress 0..1 across the runtime
+            float progress = (climaxDuration > 0.0f) ? (float)elapsed / climaxDuration : 1.0f;
 
-            // Move stars upward in spiral pattern
-            if (starsArr) {
+            // Brightness fade driven by duration: slow at first, finishing at the end.
+            // Adjust exponent (>1 = slower fade initially).
+            const float fadeExp = 1.5f;
+            float fade = 1.0f - powf(progress, fadeExp);
+            if (fade < 0.0f) fade = 0.0f;
+
+            // Optional wide-matrix vertical emphasis (just affects wobble magnitude)
+            float aspect = 1.0f;
+            #if defined(TOTAL_WIDTH) && defined(CURTAIN_HEIGHT)
+                if (CURTAIN_HEIGHT > 0) {
+                    float ratio = (float)TOTAL_WIDTH / (float)CURTAIN_HEIGHT;
+                    if (ratio > 1.0f) aspect = ratio;
+                }
+            #endif
+
+            if (starsArr && originalRows && originalBrightness) {
+                // We compute vertical position as a time-based lerp so all stars
+                // reach the TOP (row 0) exactly when progress -> 1.0
                 for (int i = 0; i < activeStarCount; i++) {
                     Star &s = starsArr[i];
 
-                    // Move upward slowly
-                    s.row -= rowsPerFrame;
+                    float startRow  = (float)originalRows[i];
+                    float targetRow = 0.0f; // reach top at the end of duration
+                    float newRow    = startRow + (targetRow - startRow) * progress;
 
-                    // Wrap around from top to bottom for continuous spiral
-                    if (s.row < 0) {
-                        s.row += CURTAIN_HEIGHT;
-                    }
+                    // Subtle vertical "wobble" to preserve spiral feel, scaled by aspect & user speed
+                    // Wobble is gentle so it won't fight the time-based climb.
+                    float wobbleAmp = 0.5f * ((float)CURTAIN_HEIGHT / fmaxf(1.0f, (float)TOTAL_WIDTH));
+                    #if !defined(TOTAL_WIDTH)
+                        float TOTAL_WIDTH = 100.0f; // safe fallback if not defined
+                    #endif
+                    #if !defined(CURTAIN_HEIGHT)
+                        float CURTAIN_HEIGHT = 26.0f; // safe fallback if not defined
+                    #endif
+                    float wobble = sinf((s.x / (float)TOTAL_WIDTH) * 6.28318f + progress * targetSpeedMultiplier)
+                                   * wobbleAmp * verticalBias * (1.0f - progress); // taper wobble near the end
+                    newRow += wobble;
 
-                    // Optional: Add slight sine wave for more spiral effect
-                    float spiralOffset = sin((s.x / TOTAL_WIDTH) * 6.28f) * 0.5f;
-                    s.row += spiralOffset * dt;
+                    // Convert to int row for rendering with clamping (no wrap)
+                    int rowInt = (int)floorf(newRow + 0.5f); // round to nearest
+                    if (rowInt < 0) rowInt = 0; // keep visible until the end (hits top at t=1)
+                    #if defined(CURTAIN_HEIGHT)
+                        if (rowInt >= CURTAIN_HEIGHT) rowInt = CURTAIN_HEIGHT - 1;
+                    #else
+                        if (rowInt >= 26) rowInt = 25;
+                    #endif
+                    s.row = rowInt;
 
-                    // Keep within bounds
-                    if (s.row < 0) s.row = 0;
-                    if (s.row >= CURTAIN_HEIGHT) s.row = CURTAIN_HEIGHT - 1;
+                    // Apply duration-driven brightness fade
+                    s.bright = originalBrightness[i] * fade;
                 }
             }
         } else {
-            // Spiral complete - restore original speeds and positions
+            // Time's up — restore globals, then clear everything visually
             minSpeedColsPerSec = originalMinSpeed;
             maxSpeedColsPerSec = originalMaxSpeed;
 
-            // Restore original speeds and row positions
+            // Restore horizontal speeds (not critical since we clear next)
             if (starsArr && originalStarSpeeds) {
                 for (int i = 0; i < activeStarCount; i++) {
                     starsArr[i].vx = originalStarSpeeds[i];
                 }
             }
 
-            if (starsArr && originalRows) {
-                for (int i = 0; i < activeStarCount; i++) {
-                    starsArr[i].row = originalRows[i];
-                }
-            }
+            // Hard clear: stars + LEDs
+            clearAllStarsAndLeds();
 
             climaxSpiralActive = false;
         }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Cleanup function (optional - call when shutting down)
+// ─────────────────────────────────────────────────────────────────────────────
 void cleanupClimaxEffects() {
-    if (originalRows) {
-        free(originalRows);
-        originalRows = nullptr;
-    }
-    if (originalStarSpeeds) {
-        free(originalStarSpeeds);
-        originalStarSpeeds = nullptr;
-    }
+    if (originalRows)        { free(originalRows);        originalRows = nullptr; }
+    if (originalStarSpeeds)  { free(originalStarSpeeds);  originalStarSpeeds = nullptr; }
+    if (originalBrightness)  { free(originalBrightness);  originalBrightness = nullptr; }
 }
 
 // Note: Add this to main.cpp loop:
-// extern void updateClimaxEffects();
-// Then call updateClimaxEffects(); in the main loop
+//   extern void updateClimaxEffects();
+//   updateClimaxEffects(); // call each frame

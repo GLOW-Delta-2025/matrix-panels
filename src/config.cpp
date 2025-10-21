@@ -21,4 +21,4 @@ uint8_t STAR_B = 3;
 
 
 // pin list - only used when USE_PINLIST is true
-const byte pinList[CURTAINS] = { 2, 14, 7, 8, 6 };
+const byte pinList[CURTAINS] = {  7, 6, 14, 2, 8 };

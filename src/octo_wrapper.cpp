@@ -4,11 +4,7 @@ DMAMEM int displayMemory[LEDS_PER_CURTAIN * 6];
 int drawingMemory[LEDS_PER_CURTAIN * 6];
 const int config_flags = WS2811_RGB | WS2811_800kHz;
 
-#if USE_PINLIST
 OctoWS2811 leds(LEDS_PER_CURTAIN, displayMemory, drawingMemory, config_flags, CURTAINS, (byte*)pinList);
-#else
-OctoWS2811 leds(LEDS_PER_CURTAIN, displayMemory, drawingMemory, config_flags);
-#endif
 
 
 void octoBegin() {
