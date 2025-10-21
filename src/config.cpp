@@ -5,20 +5,20 @@ bool invertCurtain[CURTAINS] = { false, false, false, false, false };
 
 // runtime tunables default values
 const int MAX_STARS = 500; // maximum alloc size - change higher if you have RAM
-int activeStarCount = 15; // initial active stars (<= MAX_STARS)
+int activeStarCount = 0; // initial active stars (<= MAX_STARS)
 
 
-float minSpeedColsPerSec = 10.0f;
-float maxSpeedColsPerSec = 100.0f;
+float minSpeedColsPerSec = 8.0f;
+float maxSpeedColsPerSec = 25.0f;
 float fadeFactor = 0.86f;
-unsigned long frameTargetMs = 20; // ~50 FPS
+unsigned long frameTargetMs = 1; // ~50 FPS
 bool randomRows = true;
 bool wrapStars = false;
 
 uint8_t STAR_R = 255;
 uint8_t STAR_G = 191;
-uint8_t STAR_B = 0;
+uint8_t STAR_B = 3;
 
 
 // pin list - only used when USE_PINLIST is true
-const byte pinList[CURTAINS] = { 2, 14, 7, 8, 6 };
+const byte pinList[CURTAINS] = {  7, 6, 14, 2, 8 };

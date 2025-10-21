@@ -3,13 +3,12 @@
 #include "renderer.h"
 #include "stars.h"
 #include "command_handler.h"
+#include "commands/climax_command_handler.h"
 
 unsigned long lastMicros = 0;
 
 void setup() {
   commandHandlerInit();
-
-  Serial.println("OctoStars starting...");
 
   rendererInit();
   starsInit();
@@ -17,6 +16,8 @@ void setup() {
 
   lastMicros = micros();
 }
+
+extern void updateClimaxEffects();
 
 void loop() {
   // Handle serial commands
@@ -29,6 +30,8 @@ void loop() {
   lastMicros = now;
   if (dt > 0.1f) dt = 0.1f;
 
+  updateClimaxEffects();
+
   fadeBuffer();
   updateAndRenderStars(dt);
   copyBufferToOcto();
@@ -36,5 +39,5 @@ void loop() {
 
   unsigned long frameMicros = micros() - now;
   unsigned long targetMicros = frameTargetMs * 1000UL;
-  if (frameMicros < targetMicros) delay((targetMicros - frameMicros) / 1000);
+  delay(10);
 }

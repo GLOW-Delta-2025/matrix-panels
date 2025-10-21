@@ -1,7 +1,5 @@
 #include "../include/renderer.h"
 #include "../include/octo_wrapper.h"
-#include "../include/mapping.h"
-
 
 static uint8_t *pixBuf = nullptr;
 
@@ -28,9 +26,15 @@ void addPixelRGB_soft(int globalPixelIdx, float r, float g, float b) {
     if (globalPixelIdx < 0 || globalPixelIdx >= NUM_PIXELS) return;
     int base = globalPixelIdx * 3;
     int v;
-    v = (int)pixBuf[base + 0] + (int)r; if (v > 255) v = 255; pixBuf[base + 0] = (uint8_t)v;
-    v = (int)pixBuf[base + 1] + (int)g; if (v > 255) v = 255; pixBuf[base + 1] = (uint8_t)v;
-    v = (int)pixBuf[base + 2] + (int)b; if (v > 255) v = 255; pixBuf[base + 2] = (uint8_t)v;
+
+    v = (int)pixBuf[base + 0] + (int)r;
+    if (v > 255) v = 255; pixBuf[base + 0] = (uint8_t)v;
+
+    v = (int)pixBuf[base + 1] + (int)g;
+    if (v > 255) v = 255; pixBuf[base + 1] = (uint8_t)v;
+
+    v = (int)pixBuf[base + 2] + (int)b;
+    if (v > 255) v = 255; pixBuf[base + 2] = (uint8_t)v;
 }
 
 

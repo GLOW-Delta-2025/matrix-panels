@@ -3,18 +3,22 @@
 
 #include <Arduino.h>
 #include "../lib/CmdLib.h"
+#include "commands/base_command_handler.h"
 
 // Initialize command handler
 void commandHandlerInit();
 
+// Register a handler
+void registerHandler(BaseCommandHandler *handler);
+
 // Process incoming serial data
 void processSerialCommands();
 
-// Handle a parsed command
+// Handle a parsed command using registered handlers
 void handleCommand(const cmdlib::Command &cmd);
 
 // Send a response back via serial
-void sendResponse(const String &type, const String &status, const String &message);
+void sendResponse(const cmdlib::Command &response);
 
 // Utility: estimate free memory
 int freeMemory();

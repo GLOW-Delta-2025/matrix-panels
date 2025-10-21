@@ -19,7 +19,7 @@ void starsInit() {
   randomSeed(analogRead(A0) ^ micros());
   // initialize
   for (int i = 0; i < MAX_STARS; i++) {
-    resetStar(starsArr[i], true);
+    randomizeStarProperties(starsArr[i], true);
     // spread initial x so they don't all appear at once
     starsArr[i].x = random(0, TOTAL_WIDTH * 100) / 100.0f;
   }
@@ -31,13 +31,15 @@ void starsFree() {
   starsAllocated = false;
 }
 
-void resetStar(Star &s, bool randomRowAllowed) {
+void randomizeStarProperties(Star &s, bool randomRowAllowed) {
   s.x = - (random(0, 50) / 25.0f); // -0 .. -2
   if (randomRows && randomRowAllowed) s.row = random(0, CURTAIN_HEIGHT);
   else s.row = 0;
   s.vx = random((int)(minSpeedColsPerSec * 100.0f), (int)(maxSpeedColsPerSec * 100.0f)) / 100.0f;
   s.bright = random(70, 101) / 100.0f; // 0.70 .. 1.00
 }
+
+
 
 // render a single star into the soft buffer
 static void renderStarToBuffer(const Star &s) {
@@ -47,35 +49,54 @@ static void renderStarToBuffer(const Star &s) {
   float wl = 1.0f - frac;
   float wr = frac;
   float br = s.bright;
-  float rL = STAR_R * br * wl;
-  float gL = STAR_G * br * wl;
-  float bL = STAR_B * br * wl;
-  float rR = STAR_R * br * wr;
-  float gR = STAR_G * br * wr;
-  float bR = STAR_B * br * wr;
 
-  if (leftCol >= 0 && leftCol < TOTAL_WIDTH) {
-    int curtainL = leftCol / CURTAIN_WIDTH;
-    int localColL = leftCol % CURTAIN_WIDTH;
-    int row = s.row;
-    if (curtainL >= 0 && curtainL < CURTAINS) {
-      int rowOut = invertCurtain[curtainL] ? (CURTAIN_HEIGHT - 1 - row) : row;
-      int localIndex = localIndexInCurtain(localColL, rowOut);
-      int globalIdx = globalOctoIndex(curtainL, localIndex);
-      addPixelRGB_soft(globalIdx, rL, gL, bL);
+  // Process the star and its trail based on size
+  for (int i = 0; i < s.size; i++) {
+    // Calculate brightness falloff for trail
+    float trailFactor = 1.0f - (float)i / s.size;
+    
+    // Position for this trail segment
+    float trailX = fx - i * 0.5f;
+    int trailLeftCol = (int)floorf(trailX);
+    float trailFrac = trailX - trailLeftCol;
+    float trailWl = 1.0f - trailFrac;
+    float trailWr = trailFrac;
+    
+    // Adjusted brightness for trail segment
+    float segmentBr = br * trailFactor;
+    
+    float rL = s.r * segmentBr * trailWl;
+    float gL = s.g * segmentBr * trailWl;
+    float bL = s.b * segmentBr * trailWl;
+    float rR = s.r * segmentBr * trailWr;
+    float gR = s.g * segmentBr * trailWr;
+    float bR = s.b * segmentBr * trailWr;
+
+    // Render left pixel of trail segment
+    if (trailLeftCol >= 0 && trailLeftCol < TOTAL_WIDTH) {
+      int curtainL = trailLeftCol / CURTAIN_WIDTH;
+      int localColL = trailLeftCol % CURTAIN_WIDTH;
+      int row = s.row;
+      if (curtainL >= 0 && curtainL < CURTAINS) {
+        int rowOut = invertCurtain[curtainL] ? (CURTAIN_HEIGHT - 1 - row) : row;
+        int localIndex = localIndexInCurtain(localColL, rowOut);
+        int globalIdx = globalOctoIndex(curtainL, localIndex);
+        addPixelRGB_soft(globalIdx, rL, gL, bL);
+      }
     }
-  }
 
-  int rightCol = leftCol + 1;
-  if (rightCol >= 0 && rightCol < TOTAL_WIDTH) {
-    int curtainR = rightCol / CURTAIN_WIDTH;
-    int localColR = rightCol % CURTAIN_WIDTH;
-    int row = s.row;
-    if (curtainR >= 0 && curtainR < CURTAINS) {
-      int rowOut = invertCurtain[curtainR] ? (CURTAIN_HEIGHT - 1 - row) : row;
-      int localIndex = localIndexInCurtain(localColR, rowOut);
-      int globalIdx = globalOctoIndex(curtainR, localIndex);
-      addPixelRGB_soft(globalIdx, rR, gR, bR);
+    // Render right pixel of trail segment
+    int trailRightCol = trailLeftCol + 1;
+    if (trailRightCol >= 0 && trailRightCol < TOTAL_WIDTH) {
+      int curtainR = trailRightCol / CURTAIN_WIDTH;
+      int localColR = trailRightCol % CURTAIN_WIDTH;
+      int row = s.row;
+      if (curtainR >= 0 && curtainR < CURTAINS) {
+        int rowOut = invertCurtain[curtainR] ? (CURTAIN_HEIGHT - 1 - row) : row;
+        int localIndex = localIndexInCurtain(localColR, rowOut);
+        int globalIdx = globalOctoIndex(curtainR, localIndex);
+        addPixelRGB_soft(globalIdx, rR, gR, bR);
+      }
     }
   }
 }
@@ -92,16 +113,40 @@ void updateAndRenderStars(float dt) {
       if (wrapStars) {
         s.x -= (TOTAL_WIDTH + 2.0f);
       } else {
-        resetStar(s, true);
+        randomizeStarProperties(s, true);
       }
     }
   }
 }
 
-
-bool addStar() {
+bool addStar(float speed = -1, int hexColor = -1, int brightness = -1, int size = -1) {
   Star &s = starsArr[activeStarCount];
-  resetStar(s, true);
+  randomizeStarProperties(s, true);
+
+  if (speed != -1) {
+    s.vx = speed;
+  }
+
+  if (hexColor != -1) {
+    Serial.println("hexColor");
+    Serial.println(hexColor);
+    s.r = (hexColor >> 16) & 0xFF;  // Integer value 0-255
+    s.g = (hexColor >> 8) & 0xFF;   // Integer value 0-255
+    s.b = hexColor & 0xFF;
+    Serial.println("Color");
+    Serial.println(s.r);
+    Serial.println(s.g);
+    Serial.println(s.b);
+  }
+
+  if (brightness != -1) {
+    s.bright = brightness / 100.0f;
+  }
+
+  if (size != -1) {
+    s.size = size;
+  }
+
   // start slightly left so the star slides in smoothly
   s.x = - (random(0, 50) / 25.0f);
   activeStarCount++;

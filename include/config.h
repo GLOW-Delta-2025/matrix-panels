@@ -14,7 +14,6 @@
 // Per-curtain row inversion (set in config.cpp)
 extern bool invertCurtain[CURTAINS];
 
-
 // runtime tunables (modifiable via serial reader)
 extern int activeStarCount; // number of stars currently active (<= MAX_STARS)
 extern const int MAX_STARS; // hard cap for allocation
