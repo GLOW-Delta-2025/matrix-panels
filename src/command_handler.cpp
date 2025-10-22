@@ -1,4 +1,6 @@
 #include "command_handler.h"
+
+#include "config.h"
 #include "../include/commands/star_command_handler.h"
 #include "../include/commands/climax_command_handler.h"
 
@@ -10,7 +12,10 @@ static BaseCommandHandler* handlers[20];
 static int handlerCount = 0;
 
 // Helper to build error response
-void buildError(cmdlib::Command &resp, const String &command, const String &message) {
+void buildError(cmdlib::Command &resp, const String &command, const String &message, const String &dst) {
+    resp.clear();
+    if (dst != "" )
+        resp.addHeader(dst);
     resp.command = command;
     resp.msgKind = "ERROR";
     resp.setNamed("message", message);
@@ -23,10 +28,9 @@ void registerHandler(BaseCommandHandler *handler) {
 }
 
 void commandHandlerInit() {
-    Serial.begin(9600);
-    while (!Serial && millis() < 3000) {}
+    CommunicationSerial.begin(9600);
+    while (!CommunicationSerial && millis() < 3000) {}
     // Wait up to 3 seconds for serial
-
 
     static StarCommandHandler starHandler;
     registerHandler(&starHandler);
@@ -35,8 +39,8 @@ void commandHandlerInit() {
 }
 
 void processSerialCommands() {
-    while (Serial.available() > 0) {
-        char c = Serial.read();
+    while (CommunicationSerial.available() > 0) {
+        char c = CommunicationSerial.read();
 
         // If buffer is empty, wait for the start sequence "!!"
         if (cmdBuffer.length() == 0) {
@@ -69,8 +73,8 @@ void processSerialCommands() {
                 handleCommand(cmd);
             } else {
                 cmdlib::Command errResp;
-                buildError(errResp, cmd.command, "Parse failed: " + error);
-                Serial.println(cmdBuffer);
+                buildError(errResp, cmd.command, "Parse failed: " + error, cmd.getHeader(0));
+                CommunicationSerial.println(cmdBuffer);
                 sendResponse(errResp);
             }
 
@@ -100,7 +104,7 @@ void handleCommand(const cmdlib::Command &cmd) {
 }
 
 void sendResponse(const cmdlib::Command &response) {
-    Serial.println(response.toString());
+    CommunicationSerial.println(response.toString());
 }
 
 // Simple free memory estimation (Teensy)

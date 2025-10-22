@@ -58,7 +58,7 @@ void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Com
     // Parse duration parameter (in seconds)
     float duration = cmd.getNamed("duration", "10.0").toFloat();
     if (duration <= 0 || duration > 120) {
-        buildError(response, cmd.command, "Invalid duration. Must be between 0 and 120 seconds.");
+        buildError(response, cmd.command, "Invalid duration. Must be between 0 and 120 seconds.", cmd.getHeader(0));
         return;
     }
 
@@ -96,14 +96,14 @@ void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Com
     climaxStartTime     = millis();
     climaxDuration      = duration * 1000.0f; // ms
 
-    buildResponse(response, cmd.command);
+    buildResponse(response, cmd.command, "MASTER");
 }
 
 void ClimaxCommandHandler::handleStart(const cmdlib::Command &cmd, cmdlib::Command &response) {
     // Parse duration parameter (in seconds)
     float duration = cmd.getNamed("duration", "15.0").toFloat();
     if (duration <= 0 || duration > 120) {
-        buildError(response, cmd.command, "Invalid duration. Must be between 0 and 120 seconds.");
+        buildError(response, cmd.command, "Invalid duration. Must be between 0 and 120 seconds.", cmd.getHeader(0));
         return;
     }
 
@@ -153,7 +153,7 @@ void ClimaxCommandHandler::handleStart(const cmdlib::Command &cmd, cmdlib::Comma
     climaxDuration        = duration * 1000.0f; // ms
     targetSpeedMultiplier = spiralSpeed;        // wobble influence
 
-    buildResponse(response, cmd.command);
+    buildResponse(response, cmd.command, "MASTER");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,6 +276,13 @@ void updateClimaxEffects() {
             clearAllStarsAndLeds();
 
             climaxSpiralActive = false;
+
+            // Send buildup finished command
+            cmdlib::Command finishCommand;
+            finishCommand.addHeader("MASTER");
+            finishCommand.msgKind = "REQUEST";
+            finishCommand.command = "CLIMAX_BUILDUP_FINISHED";
+            CommunicationSerial.println(finishCommand.toString());
         }
     }
 }
