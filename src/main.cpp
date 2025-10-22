@@ -3,11 +3,12 @@
 #include "renderer.h"
 #include "stars.h"
 #include "command_handler.h"
-#include "commands/climax_command_handler.h"
+#include "../lib/PingPong.cpp"
 
 unsigned long lastMicros = 0;
 
 void setup() {
+  PingPong.init(30000, &Serial1);
   commandHandlerInit();
 
   rendererInit();
@@ -20,6 +21,8 @@ void setup() {
 extern void updateClimaxEffects();
 
 void loop() {
+  PingPong.update();
+
   // Handle serial commands
   processSerialCommands();
 
@@ -36,6 +39,10 @@ void loop() {
   updateAndRenderStars(dt);
   copyBufferToOcto();
   octoShow();
+  // TODO Add idle state
+  // if (PING_IDLE) {
+  //   Serial.println("No ping ping");
+  // }
 
   unsigned long frameMicros = micros() - now;
   unsigned long targetMicros = frameTargetMs * 1000UL;

@@ -3,6 +3,7 @@
 #include "config.h"
 #include "../include/commands/star_command_handler.h"
 #include "../include/commands/climax_command_handler.h"
+#include "../lib/PingPong.h"
 
 // Serial command buffer
 static String cmdBuffer = "";
@@ -70,7 +71,11 @@ void processSerialCommands() {
             String error;
 
             if (cmdlib::parse(cmdBuffer, cmd, error)) {
-                handleCommand(cmd);
+                if (cmd.command == "PING") {
+                    PingPong.processCommand(cmd);
+                } else {
+                    handleCommand(cmd);
+                }
             } else {
                 cmdlib::Command errResp;
                 buildError(errResp, cmd.command, "Parse failed: " + error, cmd.getHeader(0));
