@@ -3,7 +3,7 @@
 #include "stars.h"
 
 void StarCommandHandler::handle(const cmdlib::Command &cmd, cmdlib::Command &response) {
-    if (cmd.command == "ADD_STAR") {
+    if (cmd.command == "ADD_STAR_CENTER") {
         handleAdd(cmd, response);
     }
     else {
@@ -63,5 +63,6 @@ void StarCommandHandler::handleAdd(const cmdlib::Command &cmd, cmdlib::Command &
             added++;
         }
     }
+
     buildResponse(response, cmd.command, "MASTER");
 }

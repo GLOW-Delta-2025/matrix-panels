@@ -199,6 +199,12 @@ void updateClimaxEffects() {
                 }
             }
 
+            cmdlib::Command finishCommand;
+            finishCommand.addHeader("MASTER");
+            finishCommand.msgKind = "REQUEST";
+            finishCommand.command = "CLIMAX_READY";
+            CommunicationSerial.println(finishCommand.toString());
+
             climaxBuildupActive = false;
         }
     }
@@ -281,7 +287,7 @@ void updateClimaxEffects() {
             cmdlib::Command finishCommand;
             finishCommand.addHeader("MASTER");
             finishCommand.msgKind = "REQUEST";
-            finishCommand.command = "CLIMAX_BUILDUP_FINISHED";
+            finishCommand.command = "CLIMAX_DONE_CENTER";
             CommunicationSerial.println(finishCommand.toString());
         }
     }
