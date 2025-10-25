@@ -1,100 +1,190 @@
-# Echoes of Tomorrow - Matrix Panels Firmware
+# LED Curtain Animation System
 
-This repository contains the embedded firmware for the microcontrollers that operate the matrix panels in the **Echoes of Tomorrow** GLOW 2025 project.
+A Teensy-based LED animation controller for driving OctoWS2811 addressable LED curtains with dynamic star and climax effects.
 
 ## Overview
-- Written in C++ for Arduino framework
-- Compiled and uploaded to microcontrollers (Teensy 4.0)
-- Controls 5 curtains of LED matrix panels (20×26 LEDs each = 2,600 total LEDs)
-- Features a star field animation with configurable parameters
-- Serial command interface for real-time control
+
+This project controls multiple LED curtain strips in a synchronized animation system. It features a command-based architecture that allows remote control of star particles and climactic buildup/release effects via serial communication.
+
+**Key Features:**
+- Multi-curtain LED control with per-strip row inversion support
+- Real-time particle system with dynamic star animations
+- Serial command interface for remote animation triggering
+- Climax effect modes (buildup and spiral animations)
+- Customizable star properties (color, speed, brightness, size)
+- Soft pixel blending and fade effects
+
+## Hardware Requirements
+
+- **Microcontroller:** Teensy 4.1 (or compatible with OctoWS2811 support)
+- **LED Driver:** OctoWS2811 breakout board
+- **LEDs:** WS2811/WS2812 addressable LED strips (5x strips of 20×26 pixels by default)
+- **Power Supply:** Appropriate capacity for LED count (500 LEDs default)
+- **Serial Interface:** USB or Serial1 for command communication
+
+## Configuration
+
+Edit `src/config.cpp` to customize hardware parameters:
+
+```cpp
+#define CURTAINS 5                // Number of LED strips
+#define CURTAIN_WIDTH 20          // LEDs per strip width
+#define CURTAIN_HEIGHT 26         // LEDs per strip height
+const int MAX_STARS = 500;        // Maximum simultaneous stars
+```
+
+Runtime tunable parameters (modifiable via serial commands):
+- `minSpeedColsPerSec` / `maxSpeedColsPerSec` — Star horizontal speed range
+- `fadeFactor` — Per-frame LED fade (0.0–1.0)
+- `frameTargetMs` — Target frame time (1ms ≈ 50 FPS)
+- `randomRows` — Spawn stars at random vertical positions
+- `wrapStars` — Loop stars or randomize when exiting
+- `STAR_R`, `STAR_G`, `STAR_B` — Default star color
+
+## Serial Command Protocol
+
+Commands use the CmdLib format: `!!source:msgKind:command{param1=value1,param2=value2}##`
+
+### ADD_STAR_CENTER
+
+Spawn animated stars across the curtains.
+
+**Parameters:**
+- `count` — Number of stars to add (default: 1)
+- `speed` — Horizontal speed 0–100 (default: 50)
+- `color` — Hex color `0xRRGGBB` (default: `0xffc003`)
+- `brightness` — Brightness 0–255 (default: 255)
+- `size` — Trail size (default: 1)
+
+**Example:**
+```
+!!MASTER:REQUEST:ADD_STAR_CENTER{count=5,speed=75,color=0xff0000,brightness=200,size=2}##
+```
+
+### BUILDUP_CLIMAX_CENTER
+
+Gradually accelerate existing stars toward a climax moment.
+
+**Parameters:**
+- `duration` — Buildup duration in seconds (default: 10.0, max: 120)
+- `speedMultiplier` — Speed acceleration factor (default: 5.0, range: 1.0–20.0)
+
+**Example:**
+```
+!!MASTER:REQUEST:BUILDUP_CLIMAX_CENTER{duration=8.0,speedMultiplier=6.0}##
+```
+
+### START_CLIMAX_CENTER
+
+Trigger the climax effect: stars spiral upward with fading brightness.
+
+**Parameters:**
+- `duration` — Climax duration in seconds (default: 15.0, max: 120)
+- `spiralSpeed` — Vertical wobble speed in rows/sec (default: 0.5, range: 0.0–5.0)
+- `speedMultiplier` — Horizontal speed boost (default: 5.0, range: 1.0–10.0)
+- `verticalBias` — Vertical motion emphasis for wide displays (default: 1.2, min: 1.0)
+
+**Example:**
+```
+!!MASTER:REQUEST:START_CLIMAX_CENTER{duration=12.0,spiralSpeed=0.8,speedMultiplier=7.0,verticalBias=1.5}##
+```
+
+### PING
+
+Health check to keep connection alive (auto-responded).
 
 ## Project Structure
+
 ```
-├── src/
-│   ├── main.cpp              # Main loop and initialization
-│   ├── config.cpp            # Configuration defaults
-│   ├── octo_wrapper.cpp      # OctoWS2811 abstraction
-│   ├── renderer.cpp          # Soft buffer & fade effects
-│   ├── serial_reader.cpp     # Serial command parser
-│   └── stars.cpp             # Star animation logic
 ├── include/
-│   ├── config.h              # Configuration constants
-│   ├── octo_wrapper.h        # OctoWS2811 interface
-│   ├── renderer.h            # Renderer interface
-│   ├── serial_reader.h       # Serial interface
-│   ├── stars.h               # Star structure & functions
-│   └── mapping.h             # Pixel coordinate mapping
+│   ├── command_handler.h          # Command routing and dispatch
+│   ├── config.h                   # Configuration constants
+│   ├── octo_wrapper.h             # OctoWS2811 abstraction layer
+│   ├── renderer.h                 # Pixel buffer & rendering
+│   ├── stars.h                    # Star particle system
+│   ├── mapping.h                  # Curtain index mapping
+│   └── commands/
+│       ├── base_command_handler.h # Command handler base class
+│       ├── star_command_handler.h # Star spawning handler
+│       └── climax_command_handler.h # Climax effect handler
 ├── lib/
-│   └── CmdLib.h              # Command protocol library
-└── platformio.ini            # PlatformIO build configuration
+│   ├── CmdLib.h                   # Command parsing library
+│   └── PingPong.h                 # Ping/pong keep-alive handler
+├── src/
+│   ├── main.cpp                   # Main loop & initialization
+│   ├── config.cpp                 # Configuration defaults
+│   ├── command_handler.cpp        # Command processing
+│   ├── octo_wrapper.cpp           # LED driver setup
+│   ├── renderer.cpp               # Soft pixel rendering
+│   ├── stars.cpp                  # Star animation logic
+│   └── commands/
+│       ├── star_command_handler.cpp
+│       └── climax_command_handler.cpp
 ```
 
-## Hardware Configuration
-- **5 Curtains**: Each curtain is a vertical strip of LEDs
-- **Dimensions**: 20 columns × 26 rows per curtain (520 LEDs each)
-- **Total LEDs**: 2,600 pixels
-- **Pin Configuration**: Customizable via `pinList` in `config.cpp`
+## How It Works
 
-## Setup Instructions
-1. Install [PlatformIO](https://platformio.org/) or use Arduino IDE with Teensy support
-2. Open the project in your IDE
-3. Select the target board in `platformio.ini` (default: `teensy40` or `teensy41`)
-4. Configure hardware settings in `src/config.cpp` if needed:
-   - Adjust `invertCurtain[]` for physical mounting orientation
-   - Modify `pinList[]` for custom pin assignments
-5. Build and upload to the connected board
+### Animation Pipeline
 
-### PlatformIO Build
-```bash
-pio run -e teensy40       # Build for Teensy 4.0
-pio run -e teensy41 -t upload   # Upload to Teensy 4.1
-```
+1. **Command Parsing** — Serial input parsed via CmdLib
+2. **Command Dispatch** — Routed to appropriate handler
+3. **Star Updates** — Position updated by velocity + effects
+4. **Rendering** — Stars drawn to soft pixel buffer with blending
+5. **Fade** — Entire buffer faded by fadeFactor
+6. **Output** — Buffer copied to OctoWS2811 and displayed
 
-## Serial Commands
-Connect via serial at 9600 baud to send runtime commands:
+### Climax Effects
 
-| Command | Arguments | Description | Example |
-|---------|-----------|-------------|---------|
-| `COUNT` | `n` | Set number of active stars (1-500) | `COUNT 30` |
-| `SPEED` | `min max` | Set speed range (cols/sec) | `SPEED 15 80` |
-| `FADE` | `factor` | Set fade factor (0.0-1.0) | `FADE 0.90` |
-| `WRAP` | `0/1` | Enable/disable star wrapping | `WRAP 1` |
-| `RANDOM_ROWS` | `0/1` | Enable/disable random row placement | `RANDOM_ROWS 1` |
-| `ROW` | `r` | Set fixed row for all stars | `ROW 13` |
+**Buildup Phase:** Stars accelerate gradually over the specified duration (slower acceleration initially, reaching full speed by 70% mark).
 
-## Configuration Parameters
-Default values in `src/config.cpp`:
-- `MAX_STARS`: 500 (maximum allocation)
-- `activeStarCount`: 15 (initial active stars)
-- `minSpeedColsPerSec`: 10.0 (minimum star speed)
-- `maxSpeedColsPerSec`: 100.0 (maximum star speed)
-- `fadeFactor`: 0.86 (trail fade per frame)
-- `frameTargetMs`: 20 (~50 FPS)
-- `STAR_R/G/B`: 255, 191, 0 (default amber color)
+**Climax/Spiral Phase:** Stars perform a time-synchronized vertical climb to the top of the curtains while:
+- Maintaining horizontal motion
+- Experiencing subtle sine-wave vertical wobble
+- Fading in brightness as they reach the top
+- Clearing completely when duration expires
+
+## Getting Started
+
+1. **Clone/download** the repository
+2. **Configure** curtain dimensions in `include/config.h`
+3. **Set pins** for OctoWS2811 in `src/config.cpp`
+4. **Upload** to Teensy via Arduino IDE (requires Teensy support + OctoWS2811 library)
+5. **Send commands** via serial terminal at 9600 baud
 
 ## Dependencies
-- [OctoWS2811](https://github.com/PaulStoffregen/OctoWS2811) (v1.5+) - High-performance LED control
-- [FastLED](https://github.com/FastLED/FastLED) (v3.10.3+) - Optional, for additional effects
 
-## Testing
-Diagnostic tests and example sketches will be added to a `tests/` directory as needed.
+- **Arduino Framework** (Teensy)
+- [OctoWS2811](https://github.com/PaulStoffregen/OctoWS2811) — LED driver library
+- CmdLib (included)
+- PingPong (included)
 
-## Documentation
-For more details on architecture, electrical schematics, and integration with the master controller, see the [project Wiki](https://github.com/GLOW-Delta-2025/master/wiki).
+## Debugging
 
-## Branches
-- `main`: Production-ready code for live installation
-- `develop`: Active development and testing
-- `feature/<name>`, `bugfix/<name>`, `hotfix/<name>`: Follow Git Flow conventions
-
-## Commit Convention
-```text
-<type>: <short description>
-
-Types: feat, fix, docs, style, refactor, test, chore
+Serial output for diagnostics:
+```cpp
+Serial.println("Registered handler: StarHandler");
+Serial.println("ERROR: not enough RAM for pixBuf");
 ```
-**Examples:**
-- `feat: add serial command for star color`
-- `fix: LED flickering on curtain 3`
-- `refactor: optimize star rendering loop`
+
+Monitor free memory (optional):
+```cpp
+int freeMemory();  // Returns estimated available RAM
+```
+
+## Performance Notes
+
+- **Frame Time:** Configurable; default 1ms for ~50 FPS
+- **Memory:** 500 stars + pixel buffer requires ~8KB RAM
+- **Limitations:** OctoWS2811 supports up to 8 curtain strips per Teensy
+
+## Future Enhancements
+
+- Preset animation sequences
+- Brightness/color ramping controls
+- Multi-device synchronization
+- Web interface for real-time tuning
+- Pattern library expansion
+
+## License
+
+Open source — modify and extend as needed for your installation.
