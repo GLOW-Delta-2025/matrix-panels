@@ -3,7 +3,7 @@
 #include "stars.h"
 
 void StarCommandHandler::handle(const cmdlib::Command &cmd, cmdlib::Command &response) {
-    if (cmd.command == "ADD_STAR") {
+    if (cmd.command == "ADD_STAR_CENTER") {
         handleAdd(cmd, response);
     }
     else {
@@ -19,29 +19,29 @@ void StarCommandHandler::handleAdd(const cmdlib::Command &cmd, cmdlib::Command &
     int size = cmd.getNamed("size", "1").toInt();         // Default size: 1
 
     if (count <= 0) {
-        buildError(response, cmd.command, "Count must be positive, got: " + String(count));
+        buildError(response, cmd.command, "Count must be positive, got: " + String(count), cmd.getHeader(0));
         return;
     }
 
     // Validate other parameters as needed
     if (speed < 0 || speed > 100) {
-        buildError(response, cmd.command, "Speed must be between 0 and 100, got: " + String(speed));
+        buildError(response, cmd.command, "Speed must be between 0 and 100, got: " + String(speed), cmd.getHeader(0));
         return;
     }
 
     if (brightness < 0 || brightness > 255) {
-        buildError(response, cmd.command, "Brightness must be between 0 and 255, got: " + String(brightness));
+        buildError(response, cmd.command, "Brightness must be between 0 and 255, got: " + String(brightness), cmd.getHeader(0));
         return;
     }
 
     if (size <= 0) {
-        buildError(response, cmd.command, "Size must be positive, got: " + String(size));
+        buildError(response, cmd.command, "Size must be positive, got: " + String(size), cmd.getHeader(0));
         return;
     }
 
     int available = MAX_STARS - activeStarCount;
     if (available <= 0) {
-        buildError(response, cmd.command,"Already at maximum stars (" + String(MAX_STARS) + ")");
+        buildError(response, cmd.command,"Already at maximum stars (" + String(MAX_STARS) + ")", cmd.getHeader(0));
         return;
     }
 
@@ -63,5 +63,6 @@ void StarCommandHandler::handleAdd(const cmdlib::Command &cmd, cmdlib::Command &
             added++;
         }
     }
-    buildResponse(response, cmd.command);
+
+    buildResponse(response, cmd.command, "MASTER");
 }

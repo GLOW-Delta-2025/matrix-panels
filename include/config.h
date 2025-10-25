@@ -30,4 +30,5 @@ extern uint8_t STAR_R, STAR_G, STAR_B;
 // pin list (if USE_PINLIST)
 extern const byte pinList[CURTAINS];
 
+#define CommunicationSerial Serial1   // or Serial1, Serial2, etc.
 #endif // OCTO_CONFIG_H

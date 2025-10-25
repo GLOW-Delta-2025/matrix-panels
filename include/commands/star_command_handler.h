@@ -6,7 +6,7 @@
 class StarCommandHandler : public BaseCommandHandler {
 public:
     bool canHandle(const String &command) const override {
-        return (command == "ADD_STAR");
+        return (command == "ADD_STAR_CENTER");
     }
     
     String getName() const override {

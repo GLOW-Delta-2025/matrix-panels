@@ -19,6 +19,5 @@ uint8_t STAR_R = 255;
 uint8_t STAR_G = 191;
 uint8_t STAR_B = 3;
 
-
 // pin list - only used when USE_PINLIST is true
 const byte pinList[CURTAINS] = {  7, 6, 14, 2, 8 };
