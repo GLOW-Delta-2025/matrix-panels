@@ -31,8 +31,8 @@
 *.out
 *.app
 
+# VS Code settings
+.vscode
+
 # PlatformIO files
 .pio
-
-# VS Code files
-.vscode
