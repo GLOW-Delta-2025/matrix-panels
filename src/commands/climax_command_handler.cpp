@@ -68,9 +68,9 @@ void ClimaxCommandHandler::handleBuildUp(const cmdlib::Command &cmd, cmdlib::Com
         targetSpeedMultiplier = 5.0f;
     }
 
-    // Store original speeds and fade factor
-    originalMinSpeed   = minSpeedColsPerSec;
-    originalMaxSpeed   = maxSpeedColsPerSec;
+    // Store original speeds and fade factor (use baseline constants to prevent compounding)
+    originalMinSpeed   = BASELINE_MIN_SPEED;
+    originalMaxSpeed   = BASELINE_MAX_SPEED;
     originalFadeFactor = fadeFactor;
 
     // Allocate memory for backups
@@ -123,9 +123,9 @@ void ClimaxCommandHandler::handleStart(const cmdlib::Command &cmd, cmdlib::Comma
     verticalBias = cmd.getNamed("verticalBias", "1.2").toFloat();
     if (verticalBias < 1.0f) verticalBias = 1.0f;
 
-    // Store original global speeds
-    originalMinSpeed = minSpeedColsPerSec;
-    originalMaxSpeed = maxSpeedColsPerSec;
+    // Store original global speeds (use baseline constants to prevent compounding)
+    originalMinSpeed = BASELINE_MIN_SPEED;
+    originalMaxSpeed = BASELINE_MAX_SPEED;
 
     // Allocate backups
     if (!originalRows)       originalRows       = (int*)   malloc(sizeof(int)   * MAX_STARS);

@@ -17,8 +17,18 @@ extern bool invertCurtain[CURTAINS];
 // runtime tunables (modifiable via serial reader)
 extern int activeStarCount; // number of stars currently active (<= MAX_STARS)
 extern const int MAX_STARS; // hard cap for allocation
-extern float minSpeedColsPerSec; // min speed (cols/sec)
-extern float maxSpeedColsPerSec; // max speed (cols/sec)
+
+// Baseline speeds - the true defaults that effects restore to
+extern const float BASELINE_MIN_SPEED;
+extern const float BASELINE_MAX_SPEED;
+
+extern float minSpeedColsPerSec; // min speed (cols/sec) - can be modified by effects
+extern float maxSpeedColsPerSec; // max speed (cols/sec) - can be modified by effects
+extern const float BASELINE_MIN_SPEED;
+extern const float BASELINE_MAX_SPEED;
+
+extern float minSpeedColsPerSec; // min speed (cols/sec) - can be modified by effects
+extern float maxSpeedColsPerSec; // max speed (cols/sec) - can be modified by effects
 extern float fadeFactor; // per-frame fade (0..1)
 extern unsigned long frameTargetMs;
 extern bool randomRows;

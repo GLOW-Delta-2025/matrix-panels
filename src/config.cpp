@@ -8,8 +8,12 @@ const int MAX_STARS = 500; // maximum alloc size - change higher if you have RAM
 int activeStarCount = 0; // initial active stars (<= MAX_STARS)
 
 
-float minSpeedColsPerSec = 8.0f;
-float maxSpeedColsPerSec = 25.0f;
+// Baseline speeds - these are the true defaults that effects should restore to
+const float BASELINE_MIN_SPEED = 8.0f;
+const float BASELINE_MAX_SPEED = 25.0f;
+
+float minSpeedColsPerSec = BASELINE_MIN_SPEED;
+float maxSpeedColsPerSec = BASELINE_MAX_SPEED;
 float fadeFactor = 0.86f;
 unsigned long frameTargetMs = 1; // ~50 FPS
 bool randomRows = true;
