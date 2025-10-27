@@ -16,8 +16,8 @@ static unsigned long buildupStartMs = 0;
 
 // Timing constants for idle animation in case of no PINGs
 const unsigned long idleWarmupMs = 30000;       // 30s of normal starfield before buildup
-const unsigned long buildupDurationMs = 20000;  // 15s buildup (match command param)
-const unsigned long climaxDurationMs = 10000;   // 10s climax (match command param)
+const unsigned long buildupDurationMs = 10000;  // 10s buildup (match command param)
+const unsigned long climaxDurationMs = 15000;   // 15s climax (match command param)
 
 void handlePingIdleAnimation();
 extern void updateClimaxEffects();
@@ -38,7 +38,7 @@ void loop() {
 
     // Handle serial commands
     processSerialCommands();
-
+    
     handlePingIdleAnimation();
 
     // Main animation loop
@@ -54,10 +54,6 @@ void loop() {
     updateAndRenderStars(dt);
     copyBufferToOcto();
     octoShow();
-  // TODO Add idle state
-  // if (PING_IDLE) {
-  //   Serial.println("No ping ping");
-  // }
 
     unsigned long frameMicros = micros() - now;
     unsigned long targetMicros = frameTargetMs * 1000UL;
@@ -92,8 +88,8 @@ void handlePingIdleAnimation() {
             buildupCmd.addHeader("MASTER");
             buildupCmd.msgKind = "REQUEST";
             buildupCmd.command = "BUILDUP_CLIMAX_CENTER";
-            buildupCmd.setNamed("duration", "20.0");
-            buildupCmd.setNamed("speedMultiplier", "1.2");
+            buildupCmd.setNamed("duration", "10.0");
+            buildupCmd.setNamed("speedMultiplier", "4.0");
             handleCommand(buildupCmd);
 
             buildupSent = true;
@@ -107,8 +103,8 @@ void handlePingIdleAnimation() {
             climaxCmd.addHeader("MASTER");
             climaxCmd.msgKind = "REQUEST";
             climaxCmd.command = "START_CLIMAX_CENTER";
-            climaxCmd.setNamed("duration", "10.0");
-            climaxCmd.setNamed("speedMultiplier", "1.1");
+            climaxCmd.setNamed("duration", "15.0");
+            climaxCmd.setNamed("speedMultiplier", "4.0");
             climaxCmd.setNamed("spiralSpeed", "0.2");
             handleCommand(climaxCmd);
 
